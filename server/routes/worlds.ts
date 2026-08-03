@@ -17,6 +17,14 @@ interface WorldRow {
   created_at: string
 }
 
+function resolveSceneImageUrl(row: WorldRow): string | null {
+  if (row.scene_image_url) return row.scene_image_url
+  const firstScene = db
+    .prepare('SELECT image_url FROM scenes WHERE world_id = ? ORDER BY created_at ASC LIMIT 1')
+    .get(row.id) as { image_url: string } | undefined
+  return firstScene?.image_url ?? null
+}
+
 function toWorld(row: WorldRow) {
   return {
     id: row.id,
@@ -24,7 +32,7 @@ function toWorld(row: WorldRow) {
     name: row.name,
     sceneId: row.scene_id,
     sceneLabel: row.scene_label,
-    sceneImageUrl: row.scene_image_url,
+    sceneImageUrl: resolveSceneImageUrl(row),
     progress: row.progress,
     playTimeMinutes: row.play_time_minutes,
     lastPlayedAt: row.last_played_at,

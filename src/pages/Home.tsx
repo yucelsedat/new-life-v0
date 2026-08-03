@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import Scene from '../three/Scene'
+import WorldCard from '../components/WorldCard'
 import FloatingMenu from '../components/FloatingMenu'
 import TopBar from '../components/TopBar'
 import StatusBar from '../components/StatusBar'
@@ -10,10 +10,6 @@ import { useWorlds } from '../hooks/useWorlds'
 import { useProfile } from '../hooks/useProfile'
 import { useSystemStatus } from '../hooks/useSystemStatus'
 import { useFpsMeter } from '../hooks/useFpsMeter'
-import { useResponsiveLayout } from '../hooks/useResponsiveLayout'
-import { useMouseParallax } from '../hooks/useMouseParallax'
-import { useSphereCarousel } from '../hooks/useSphereCarousel'
-import { createCameraFocus, type CameraFocusState } from '../three/cameraFocus'
 import { staggerContainer } from '../utils/animations'
 
 export default function Home() {
@@ -22,47 +18,32 @@ export default function Home() {
   const profile = useProfile()
   const status = useSystemStatus()
   const fps = useFpsMeter()
-  const layout = useResponsiveLayout()
-  const parallax = useMouseParallax()
-  const carousel = useSphereCarousel(worlds.length)
 
-  const cameraFocusRef = useRef<CameraFocusState | null>(null)
-  if (!cameraFocusRef.current) cameraFocusRef.current = createCameraFocus()
-
-  const [hoveredWorldId, setHoveredWorldId] = useState<string | null>(null)
   const [isTransitioning, setIsTransitioning] = useState(false)
+  const [enteringWorldId, setEnteringWorldId] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (layout.breakpoint !== 'mobile' || worlds.length === 0) return
-    setHoveredWorldId(worlds[carousel.activeIndex]?.id ?? null)
-  }, [carousel.activeIndex, layout.breakpoint, worlds])
-
-  const handleSelectWorld = useCallback((_id: string, position: [number, number, number]) => {
-    const focus = cameraFocusRef.current
-    if (!focus) return
-    focus.position.set(position[0], position[1], position[2])
-    focus.dollying = true
+  const handleEnter = useCallback((worldId: string) => {
+    setEnteringWorldId(worldId)
     setIsTransitioning(true)
   }, [])
 
   const handleTransitionComplete = useCallback(() => {
-    navigate('/game')
-  }, [navigate])
-
-  const isMobile = layout.breakpoint === 'mobile'
+    if (enteringWorldId) navigate(`/game/${enteringWorldId}`)
+  }, [navigate, enteringWorldId])
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-void">
-      <div className="absolute inset-0" {...(isMobile ? carousel.bind : {})}>
-        <Scene
-          worlds={worlds}
-          layout={layout}
-          hoveredWorldId={hoveredWorldId}
-          onHoverWorld={setHoveredWorldId}
-          onSelectWorld={handleSelectWorld}
-          parallax={parallax}
-          cameraFocus={cameraFocusRef as RefObject<CameraFocusState>}
-        />
+      <div className="h-full overflow-y-auto px-6 pt-24 pb-28 sm:pl-32 sm:pr-10 sm:pt-36 lg:px-32">
+        <motion.div
+          initial="hidden"
+          animate="visible"
+          variants={staggerContainer}
+          className="mx-auto grid max-w-7xl grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+        >
+          {worlds.map((world) => (
+            <WorldCard key={world.id} world={world} onEnter={handleEnter} />
+          ))}
+        </motion.div>
       </div>
 
       <motion.div

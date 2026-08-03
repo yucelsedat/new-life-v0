@@ -2,17 +2,13 @@ import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { FiUploadCloud } from 'react-icons/fi'
 import { useT } from '../../i18n'
 import { SCENE_IDS } from '../../utils/constants'
-import { getProceduralSceneTexture } from '../../utils/proceduralScenes'
+import { getProceduralSceneDataUrl } from '../../utils/proceduralScenes'
 import { useGalleryImages } from '../../hooks/useGalleryImages'
 import type { GalleryImage } from '../../types/world'
 import { formatFileSize, formatRelativeDate } from '../../utils/helpers'
 
 function useSceneThumbnail(sceneId: (typeof SCENE_IDS)[number]): string {
-  return useMemo(() => {
-    const texture = getProceduralSceneTexture(sceneId)
-    const canvas = texture.image as HTMLCanvasElement
-    return canvas.toDataURL('image/png')
-  }, [sceneId])
+  return useMemo(() => getProceduralSceneDataUrl(sceneId), [sceneId])
 }
 
 function SceneCard({ sceneId, label }: { sceneId: (typeof SCENE_IDS)[number]; label: string }) {

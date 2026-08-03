@@ -9,7 +9,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Home />} />
-        <Route path="/game" element={<Game />} />
+        <Route path="/game/:worldId" element={<Game />} />
         <Route path="/admin" element={<Admin />} />
         <Route path="/admin/worlds/:worldId" element={<AdminWorldEditor />} />
       </Routes>

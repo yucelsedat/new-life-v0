@@ -1,7 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
 import { useT } from '../i18n'
-import { CAMERA } from '../utils/constants'
+import { TRANSITION_DURATION_MS } from '../utils/constants'
 
 interface LoadingTransitionProps {
   active: boolean
@@ -23,7 +23,7 @@ export default function LoadingTransition({ active, onComplete }: LoadingTransit
 
     function tick(now: number) {
       const elapsed = now - start
-      const next = Math.min(1, elapsed / (CAMERA.dollyDurationMs + 900))
+      const next = Math.min(1, elapsed / (TRANSITION_DURATION_MS + 900))
       setProgress(next)
       if (next < 1) {
         rafId = requestAnimationFrame(tick)

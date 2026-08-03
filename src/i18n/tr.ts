@@ -17,6 +17,7 @@ export const tr = {
     lastPlayed: 'Son oynama',
     progress: 'İlerleme',
     createdAt: 'Kayıt tarihi',
+    enter: 'İçine Gir',
   },
   profile: {
     level: 'Seviye',
