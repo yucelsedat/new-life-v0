@@ -1,9 +1,8 @@
-import * as THREE from 'three'
 import type { SceneId } from '../types/world'
 import { SCENE_PALETTES } from './constants'
 
 const TEXTURE_SIZE = 512
-const cache = new Map<SceneId, THREE.CanvasTexture>()
+const cache = new Map<SceneId, HTMLCanvasElement>()
 
 function mulberry32(seed: number) {
   return function random() {
@@ -72,7 +71,7 @@ function paintScene(ctx: CanvasRenderingContext2D, sceneId: SceneId): void {
   }
 }
 
-export function getProceduralSceneTexture(sceneId: SceneId): THREE.CanvasTexture {
+export function getProceduralSceneCanvas(sceneId: SceneId): HTMLCanvasElement {
   const cached = cache.get(sceneId)
   if (cached) return cached
 
@@ -84,9 +83,10 @@ export function getProceduralSceneTexture(sceneId: SceneId): THREE.CanvasTexture
 
   paintScene(ctx, sceneId)
 
-  const texture = new THREE.CanvasTexture(canvas)
-  texture.colorSpace = THREE.SRGBColorSpace
-  texture.needsUpdate = true
-  cache.set(sceneId, texture)
-  return texture
+  cache.set(sceneId, canvas)
+  return canvas
+}
+
+export function getProceduralSceneDataUrl(sceneId: SceneId): string {
+  return getProceduralSceneCanvas(sceneId).toDataURL('image/png')
 }

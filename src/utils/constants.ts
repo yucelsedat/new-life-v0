@@ -8,41 +8,7 @@ export const COLORS = {
   ice: '#8FB4C9',
 } as const
 
-export const SPHERE = {
-  heroRadius: 1.4,
-  satelliteRadius: 1.0,
-  heroScaleBoost: 1.4,
-  innerSceneRatio: 0.62,
-  glassRoughness: 0.04,
-  glassIor: 1.52,
-  arcSpreadRadians: Math.PI * 0.72,
-  arcDepthVariance: 0.6,
-  hoverScale: 1.08,
-} as const
-
-export const CAMERA = {
-  fov: 35,
-  restDistance: 8.5,
-  dollyDistance: 3.2,
-  dollyDurationMs: 1400,
-  parallaxStrength: 0.35,
-  dampingLambda: 4,
-} as const
-
-export const ANIMATION = {
-  floatAmplitude: 0.12,
-  floatSpeed: 0.35,
-  swayAmplitude: 0.06,
-  swaySpeed: 0.22,
-  rotateSpeed: 0.08,
-  hoverDampLambda: 6,
-} as const
-
-export const QUALITY = {
-  hero: { resolution: 256, samples: 4 },
-  satellite: { resolution: 64, samples: 2 },
-  lite: { resolution: 0, samples: 0 },
-} as const
+export const TRANSITION_DURATION_MS = 1400
 
 export const BREAKPOINTS = {
   tablet: 1024,
