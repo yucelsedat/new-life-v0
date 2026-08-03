@@ -44,6 +44,39 @@ export const tr = {
     sehir: 'Şehir',
     park: 'Park',
   },
+  admin: {
+    title: 'Dünya Mutfağı',
+    subtitle: 'Kayıtlı dünyaları yönet, yenilerini yarat.',
+    backToHome: 'Ana Sayfaya Dön',
+    tabs: {
+      worlds: 'Dünyalar',
+      gallery: 'Galeri',
+    },
+    worlds: {
+      existingTitle: 'Kayıtlı Dünyalar',
+      createTitle: 'Yeni Dünya Yarat',
+      nameLabel: 'Dünya Adı',
+      namePlaceholder: 'New Life #7',
+      sceneLabel: 'Sahne',
+      submit: 'Dünyayı Oluştur',
+      submitting: 'Oluşturuluyor…',
+      empty: 'Henüz kayıtlı dünya yok.',
+      loadError: 'Dünyalar yüklenemedi. Sunucu bağlantısını kontrol edin.',
+      slot: 'Slot',
+      progress: 'İlerleme',
+      lastPlayed: 'Son Oynama',
+    },
+    gallery: {
+      title: 'Sahne Galerisi',
+      subtitle: 'Dünyalara atanabilecek prosedürel sahne önizlemeleri.',
+      uploadedTitle: 'Yüklenen Görseller',
+      uploadedSubtitle: 'Bilgisayarından yüklediğin özel sahne görselleri.',
+      uploadButton: 'Görsel Yükle',
+      uploading: 'Yükleniyor…',
+      uploadError: 'Yükleme başarısız oldu. Lütfen tekrar deneyin.',
+      empty: 'Henüz yüklenen görsel yok.',
+    },
+  },
 } as const
 
 export type Strings = typeof tr

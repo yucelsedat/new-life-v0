@@ -35,6 +35,14 @@ export interface SystemStatus {
   latencyMs: number | null
 }
 
+export interface GalleryImage {
+  id: string
+  url: string
+  originalName: string
+  sizeBytes: number
+  uploadedAt: string
+}
+
 export type QualityTier = 'hero' | 'satellite' | 'lite'
 
 export type LayoutBreakpoint = 'desktop' | 'tablet' | 'mobile'

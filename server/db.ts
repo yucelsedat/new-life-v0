@@ -32,4 +32,13 @@ db.exec(`
     is_premium INTEGER NOT NULL DEFAULT 0,
     unread_notifications INTEGER NOT NULL DEFAULT 0
   );
+
+  CREATE TABLE IF NOT EXISTS images (
+    id TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    uploaded_at TEXT NOT NULL
+  );
 `)

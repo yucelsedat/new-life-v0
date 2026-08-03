@@ -22,8 +22,8 @@ export function getSceneGeometry(): THREE.SphereGeometry {
 
 export const GROUND_REFLECTOR_CONFIG = {
   args: [40, 40] as [number, number],
-  resolution: 512,
-  mixBlur: 8,
+  resolution: 256,
+  mixBlur: 3,
   mixStrength: 1.4,
   mirror: 0.35,
   color: '#0a0f1c',

@@ -16,8 +16,18 @@ dist-ssr
 server/data/*.db
 server/data/*.db-journal
 
+# Uploaded gallery images
+server/uploads/*
+!server/uploads/.gitkeep
+
 # Claude Code harness internals
 .claude/
+
+# playwright-cli debug artifacts
+.playwright-cli/
+
+# graphify analysis output
+graphify-out/
 
 # Editor directories and files
 .vscode/*

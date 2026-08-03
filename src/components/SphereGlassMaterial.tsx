@@ -58,12 +58,8 @@ export default function SphereGlassMaterial({ quality, hovered, accentColor }: S
         roughness={SPHERE.glassRoughness}
         ior={SPHERE.glassIor}
         chromaticAberration={0.03}
-        anisotropicBlur={0.15}
         distortion={0.1}
-        distortionScale={0.25}
-        temporalDistortion={0.08}
-        backside
-        backsideThickness={0.3}
+        distortionScale={0.2}
         resolution={QUALITY.hero.resolution}
         samples={QUALITY.hero.samples}
         color={rimColor.current}
@@ -78,11 +74,9 @@ export default function SphereGlassMaterial({ quality, hovered, accentColor }: S
       thickness={0.5}
       roughness={SPHERE.glassRoughness}
       ior={SPHERE.glassIor}
-      chromaticAberration={0.025}
-      distortion={0.08}
-      distortionScale={0.2}
-      backside={false}
-      resolution={QUALITY.satellite.resolution}
+      chromaticAberration={0.02}
+      distortion={0.06}
+      distortionScale={0.15}
       samples={QUALITY.satellite.samples}
       color={rimColor.current}
     />

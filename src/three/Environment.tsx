@@ -1,11 +1,17 @@
-import { Environment as DreiEnvironment, MeshReflectorMaterial } from '@react-three/drei'
+import { Environment as DreiEnvironment, Lightformer, MeshReflectorMaterial } from '@react-three/drei'
 import { COLORS } from '../utils/constants'
 import { GROUND_REFLECTOR_CONFIG } from './Materials'
 
 export default function Environment() {
   return (
     <>
-      <DreiEnvironment preset="night" environmentIntensity={0.55} />
+      <DreiEnvironment resolution={256} frames={1} environmentIntensity={0.6}>
+        <Lightformer form="ring" color={COLORS.goldBright} intensity={3} scale={6} position={[0, 4, -6]} target={[0, 0, 0]} />
+        <Lightformer form="rect" color={COLORS.ice} intensity={1.5} scale={[8, 4]} position={[-6, 2, 2]} target={[0, 0, 0]} />
+        <Lightformer form="rect" color={COLORS.gold} intensity={1.2} scale={[6, 3]} position={[6, 1, 3]} target={[0, 0, 0]} />
+        <Lightformer form="circle" color={COLORS.abyss} intensity={0.6} scale={12} position={[0, -6, 4]} target={[0, 0, 0]} />
+      </DreiEnvironment>
+
       <fogExp2 attach="fog" args={[COLORS.void, 0.045]} />
       <color attach="background" args={[COLORS.void]} />
 
