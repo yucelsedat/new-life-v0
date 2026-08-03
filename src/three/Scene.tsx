@@ -36,10 +36,10 @@ export default function Scene({ worlds, layout, hoveredWorldId, onHoverWorld, on
       gl={{ antialias: false, powerPreference: 'high-performance' }}
       camera={{ fov: CAMERA.fov, position: [0, 0.4, CAMERA.restDistance] }}
     >
-      <Environment />
-      <Lighting />
-      <BackgroundParticles />
       <Suspense fallback={null}>
+        <Environment />
+        <Lighting />
+        <BackgroundParticles />
         {worlds.map((world) => {
           const placement = placementById.get(world.id)
           if (!placement) return null
@@ -55,9 +55,9 @@ export default function Scene({ worlds, layout, hoveredWorldId, onHoverWorld, on
             />
           )
         })}
+        <CameraRig parallax={parallax} focus={cameraFocus} />
+        <Effects />
       </Suspense>
-      <CameraRig parallax={parallax} focus={cameraFocus} />
-      <Effects />
     </Canvas>
   )
 }

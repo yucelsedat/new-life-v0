@@ -39,8 +39,8 @@ export const ANIMATION = {
 } as const
 
 export const QUALITY = {
-  hero: { resolution: 512, samples: 8 },
-  satellite: { resolution: 128, samples: 4 },
+  hero: { resolution: 256, samples: 4 },
+  satellite: { resolution: 64, samples: 2 },
   lite: { resolution: 0, samples: 0 },
 } as const
 
@@ -57,3 +57,5 @@ export const SCENE_PALETTES: Record<SceneId, { base: string; accent: string; glo
   sehir: { base: '#1A0B2E', accent: '#C23FCE', glow: '#FF7EE8' },
   park: { base: '#0D1F10', accent: '#6FBF4F', glow: '#C9E88A' },
 }
+
+export const SCENE_IDS: SceneId[] = ['salon', 'yatak-odasi', 'mutfak', 'ofis', 'sehir', 'park']
