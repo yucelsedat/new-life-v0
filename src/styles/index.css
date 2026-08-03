@@ -1,0 +1,68 @@
+@import "tailwindcss";
+
+@import "@fontsource-variable/fraunces/opsz.css";
+@import "@fontsource-variable/dm-sans/wght.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+
+@theme {
+  --color-void: #05070e;
+  --color-abyss: #0a0f1c;
+  --color-abyss-light: #121a2e;
+  --color-gold: #c9a227;
+  --color-gold-bright: #e8c766;
+  --color-ice: #8fb4c9;
+  --color-mist: #aab6cc;
+
+  --font-display: "Fraunces Variable", ui-serif, serif;
+  --font-sans: "DM Sans Variable", ui-sans-serif, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+  --text-logo: 5.5rem;
+  --text-logo--line-height: 1;
+  --text-logo--font-weight: 300;
+  --text-tagline: 1.15rem;
+  --text-tagline--letter-spacing: 0.14em;
+  --text-h1: 2.25rem;
+  --text-h2: 1.5rem;
+  --text-body: 0.9375rem;
+  --text-caption: 0.75rem;
+  --text-micro: 0.6875rem;
+
+  --animate-pulse-slow: pulse-slow 4s ease-in-out infinite;
+
+  @keyframes pulse-slow {
+    0%,
+    100% {
+      opacity: 0.5;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background: var(--color-void);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-weight: 200;
+  color: #f2f0e8;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-gold) 40%, transparent);
+}
+
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
