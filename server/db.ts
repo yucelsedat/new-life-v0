@@ -41,4 +41,22 @@ db.exec(`
     size_bytes INTEGER NOT NULL,
     uploaded_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS scenes (
+    id TEXT PRIMARY KEY,
+    world_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    image_url TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS scene_links (
+    id TEXT PRIMARY KEY,
+    from_scene_id TEXT NOT NULL,
+    to_scene_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    position_x REAL NOT NULL DEFAULT 50,
+    position_y REAL NOT NULL DEFAULT 50,
+    created_at TEXT NOT NULL
+  );
 `)

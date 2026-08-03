@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import Home from './pages/Home'
 import Game from './pages/Game'
 import Admin from './pages/Admin'
+import AdminWorldEditor from './pages/AdminWorldEditor'
 
 function App() {
   return (
@@ -10,6 +11,7 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/game" element={<Game />} />
         <Route path="/admin" element={<Admin />} />
+        <Route path="/admin/worlds/:worldId" element={<AdminWorldEditor />} />
       </Routes>
     </BrowserRouter>
   )

@@ -1,4 +1,6 @@
 import { useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
+import { FiEdit3 } from 'react-icons/fi'
 import type { SceneId, World } from '../../types/world'
 import { useWorlds } from '../../hooks/useWorlds'
 import { useT } from '../../i18n'
@@ -111,6 +113,7 @@ export default function AdminWorldsPanel() {
                   <th className="py-2 pr-4">{t.admin.worlds.sceneLabel}</th>
                   <th className="py-2 pr-4">{t.admin.worlds.progress}</th>
                   <th className="py-2 pr-4">{t.admin.worlds.lastPlayed}</th>
+                  <th className="py-2 pr-4" />
                 </tr>
               </thead>
               <tbody>
@@ -140,6 +143,15 @@ export default function AdminWorldsPanel() {
                     </td>
                     <td className="py-3 pr-4 font-sans text-caption text-mist">
                       {formatRelativeDate(world.lastPlayedAt)} · {formatPlayTime(world.playTimeMinutes)}
+                    </td>
+                    <td className="py-3 pr-4">
+                      <Link
+                        to={`/admin/worlds/${world.id}`}
+                        className="flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1.5 font-sans text-micro font-[700] text-white/70 transition hover:border-gold-bright hover:text-gold-bright"
+                      >
+                        <FiEdit3 className="h-3 w-3" />
+                        {t.admin.worlds.editButton}
+                      </Link>
                     </td>
                   </tr>
                 ))}
