@@ -43,6 +43,26 @@ export interface GalleryImage {
   uploadedAt: string
 }
 
+export interface SceneLink {
+  id: string
+  fromSceneId: string
+  toSceneId: string
+  label: string
+  positionX: number
+  positionY: number
+  createdAt: string
+  toSceneName?: string | null
+}
+
+export interface WorldScene {
+  id: string
+  worldId: string
+  name: string
+  imageUrl: string
+  createdAt: string
+  links?: SceneLink[]
+}
+
 export type QualityTier = 'hero' | 'satellite' | 'lite'
 
 export type LayoutBreakpoint = 'desktop' | 'tablet' | 'mobile'
