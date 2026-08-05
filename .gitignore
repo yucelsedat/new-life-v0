@@ -12,9 +12,8 @@ dist
 dist-ssr
 *.local
 
-# Runtime SQLite database
-server/data/*.db
-server/data/*.db-journal
+# Runtime SQLite database (yedekler dahil)
+server/data/
 
 # Uploaded gallery images
 server/uploads/*

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { FiCheck, FiX } from 'react-icons/fi'
-import { useGalleryImages } from '../../hooks/useGalleryImages'
+import { useGalleryImages, type GalleryScope } from '../../hooks/useGalleryImages'
 import { useT } from '../../i18n'
 
 interface GalleryPickerModalProps {
@@ -11,6 +11,8 @@ interface GalleryPickerModalProps {
   isSubmitting: boolean
   /** Image URLs already in use — shown with a check badge and not selectable. */
   usedUrls?: string[]
+  /** Which image library to pick from. */
+  scope: GalleryScope
   onConfirm: (name: string, imageUrl: string) => void
   onCancel: () => void
 }
@@ -20,11 +22,12 @@ export default function GalleryPickerModal({
   nameLabel,
   isSubmitting,
   usedUrls = [],
+  scope,
   onConfirm,
   onCancel,
 }: GalleryPickerModalProps) {
   const t = useT()
-  const { images } = useGalleryImages()
+  const { images } = useGalleryImages(scope)
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null)
   const [name, setName] = useState('')
 

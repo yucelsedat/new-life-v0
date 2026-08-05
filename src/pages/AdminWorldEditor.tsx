@@ -205,6 +205,7 @@ export default function AdminWorldEditor() {
       )}
 
       <GalleryPickerModal
+        scope={{ worldId, kind: 'scene' }}
         open={modalMode !== null}
         nameLabel={
           modalMode === 'create-variant'

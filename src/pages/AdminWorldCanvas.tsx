@@ -460,6 +460,7 @@ export default function AdminWorldCanvas() {
       </div>
 
       <GalleryPickerModal
+        scope={{ worldId, kind: 'scene' }}
         open={addSceneOpen}
         nameLabel={t.admin.editor.modal.sceneNameLabel}
         isSubmitting={isSubmitting}

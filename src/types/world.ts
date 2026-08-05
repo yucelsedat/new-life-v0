@@ -35,12 +35,17 @@ export interface SystemStatus {
   latencyMs: number | null
 }
 
+export type ImageKind = 'scene' | 'character'
+
 export interface GalleryImage {
   id: string
   url: string
   originalName: string
   sizeBytes: number
   uploadedAt: string
+  /** null = global library (not tied to a world) */
+  worldId: string | null
+  kind: ImageKind
 }
 
 export interface SceneLink {
