@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { FiEdit3 } from 'react-icons/fi'
+import { FiEdit3, FiImage } from 'react-icons/fi'
 import type { SceneId, World } from '../../types/world'
 import { useWorlds } from '../../hooks/useWorlds'
 import { useT } from '../../i18n'
@@ -145,13 +145,22 @@ export default function AdminWorldsPanel() {
                       {formatRelativeDate(world.lastPlayedAt)} · {formatPlayTime(world.playTimeMinutes)}
                     </td>
                     <td className="py-3 pr-4">
-                      <Link
-                        to={`/admin/worlds/${world.id}`}
-                        className="flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1.5 font-sans text-micro font-[700] text-white/70 transition hover:border-gold-bright hover:text-gold-bright"
-                      >
-                        <FiEdit3 className="h-3 w-3" />
-                        {t.admin.worlds.editButton}
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/admin/worlds/${world.id}/assets`}
+                          className="flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1.5 font-sans text-micro font-[700] text-white/70 transition hover:border-gold-bright hover:text-gold-bright"
+                        >
+                          <FiImage className="h-3 w-3" />
+                          {t.admin.assets.button}
+                        </Link>
+                        <Link
+                          to={`/admin/worlds/${world.id}`}
+                          className="flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1.5 font-sans text-micro font-[700] text-white/70 transition hover:border-gold-bright hover:text-gold-bright"
+                        >
+                          <FiEdit3 className="h-3 w-3" />
+                          {t.admin.worlds.editButton}
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}

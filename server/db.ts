@@ -75,3 +75,36 @@ for (const column of ['canvas_x', 'canvas_y']) {
     // column already exists
   }
 }
+
+// Images gained a scope (which world they belong to) and a kind (scene artwork vs character).
+// NULL world_id means the image lives in the global character library.
+let imagesJustScoped = false
+try {
+  db.exec(`ALTER TABLE images ADD COLUMN world_id TEXT`)
+  imagesJustScoped = true
+} catch {
+  // column already exists
+}
+try {
+  db.exec(`ALTER TABLE images ADD COLUMN kind TEXT NOT NULL DEFAULT 'character'`)
+} catch {
+  // column already exists
+}
+
+if (imagesJustScoped) {
+  // Back-fill: any image already used as a scene background or scene variant demonstrably
+  // belongs to that scene's world, so scope it there and mark it as scene artwork.
+  db.exec(`
+    UPDATE images SET kind = 'scene', world_id = (
+      SELECT s.world_id FROM scenes s WHERE s.image_url = images.url LIMIT 1
+    )
+    WHERE url IN (SELECT image_url FROM scenes);
+
+    UPDATE images SET kind = 'scene', world_id = (
+      SELECT s.world_id FROM scenes s
+      JOIN scene_variants v ON v.scene_id = s.id
+      WHERE v.image_url = images.url LIMIT 1
+    )
+    WHERE url IN (SELECT image_url FROM scene_variants);
+  `)
+}

@@ -4,6 +4,7 @@ import Game from './pages/Game'
 import Admin from './pages/Admin'
 import AdminWorldEditor from './pages/AdminWorldEditor'
 import AdminWorldCanvas from './pages/AdminWorldCanvas'
+import AdminWorldAssets from './pages/AdminWorldAssets'
 
 function App() {
   return (
@@ -14,6 +15,7 @@ function App() {
         <Route path="/admin" element={<Admin />} />
         <Route path="/admin/worlds/:worldId" element={<AdminWorldEditor />} />
         <Route path="/admin/worlds/:worldId/canvas" element={<AdminWorldCanvas />} />
+        <Route path="/admin/worlds/:worldId/assets" element={<AdminWorldAssets />} />
       </Routes>
     </BrowserRouter>
   )

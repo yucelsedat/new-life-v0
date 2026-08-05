@@ -52,7 +52,7 @@ export const tr = {
     backToHome: 'Ana Sayfaya Dön',
     tabs: {
       worlds: 'Dünyalar',
-      gallery: 'Galeri',
+      characters: 'Karakterler',
     },
     worlds: {
       existingTitle: 'Kayıtlı Dünyalar',
@@ -101,14 +101,25 @@ export const tr = {
       cancel: 'Vazgeç',
     },
     gallery: {
-      title: 'Sahne Galerisi',
-      subtitle: 'Dünyalara atanabilecek prosedürel sahne önizlemeleri.',
-      uploadedTitle: 'Yüklenen Görseller',
-      uploadedSubtitle: 'Bilgisayarından yüklediğin özel sahne görselleri.',
       uploadButton: 'Görsel Yükle',
       uploading: 'Yükleniyor…',
       uploadError: 'Yükleme başarısız oldu. Lütfen tekrar deneyin.',
-      empty: 'Henüz yüklenen görsel yok.',
+    },
+    characters: {
+      title: 'Karakterler',
+      subtitle: 'Tüm dünyalarda kullanılabilen ortak karakter görselleri.',
+      empty: 'Henüz karakter görseli yok. Yukarıdan yükleyebilirsin.',
+    },
+    assets: {
+      button: 'Assets',
+      title: 'Dünya Assetleri',
+      backToWorlds: 'Dünyalara Dön',
+      scenesTitle: 'Sahne Resimleri',
+      scenesSubtitle: 'Bu dünyanın sahnelerinde kullanılabilecek görseller.',
+      scenesEmpty: 'Bu dünya için henüz sahne görseli yok. Yukarıdan yükleyebilirsin.',
+      charactersTitle: 'Karakterler',
+      charactersSubtitle: 'Bu dünyaya özel karakter görselleri.',
+      charactersEmpty: 'Bu dünya için henüz karakter görseli yok. Yukarıdan yükleyebilirsin.',
     },
   },
 } as const

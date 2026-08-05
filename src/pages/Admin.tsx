@@ -3,9 +3,9 @@ import { Link } from 'react-router-dom'
 import { FiArrowLeft } from 'react-icons/fi'
 import { useT } from '../i18n'
 import AdminWorldsPanel from '../components/admin/AdminWorldsPanel'
-import AdminGalleryPanel from '../components/admin/AdminGalleryPanel'
+import AdminCharactersPanel from '../components/admin/AdminCharactersPanel'
 
-type AdminTab = 'worlds' | 'gallery'
+type AdminTab = 'worlds' | 'characters'
 
 export default function Admin() {
   const t = useT()
@@ -13,7 +13,7 @@ export default function Admin() {
 
   const tabs: { id: AdminTab; label: string }[] = [
     { id: 'worlds', label: t.admin.tabs.worlds },
-    { id: 'gallery', label: t.admin.tabs.gallery },
+    { id: 'characters', label: t.admin.tabs.characters },
   ]
 
   return (
@@ -50,7 +50,7 @@ export default function Admin() {
       </header>
 
       <main className="px-6 py-10 md:px-12">
-        {tab === 'worlds' ? <AdminWorldsPanel /> : <AdminGalleryPanel />}
+        {tab === 'worlds' ? <AdminWorldsPanel /> : <AdminCharactersPanel />}
       </main>
     </div>
   )
