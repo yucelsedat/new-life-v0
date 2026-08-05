@@ -26,8 +26,9 @@ server/uploads/*
 # playwright-cli debug artifacts
 .playwright-cli/
 
-# graphify analysis output
+# graphify analysis output (her geliştirici kendi grafını üretir)
 graphify-out/
+CLAUDE.md
 
 # Editor directories and files
 .vscode/*
