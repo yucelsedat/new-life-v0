@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { SceneLink, WorldScene } from '../types/world'
+import type { SceneLink, SceneVariant, WorldScene } from '../types/world'
 
 export interface UseWorldEditorResult {
   scenes: WorldScene[]
@@ -8,6 +8,7 @@ export interface UseWorldEditorResult {
   error: string | null
   createFirstScene: (name: string, imageUrl: string) => Promise<void>
   createLink: (label: string, imageUrl: string, positionX?: number, positionY?: number) => Promise<void>
+  createVariant: (imageUrl: string) => Promise<void>
   goToScene: (sceneId: string) => Promise<void>
   updateLinkPosition: (linkId: string, positionX: number, positionY: number) => void
 }
@@ -91,6 +92,28 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     [currentScene],
   )
 
+  const createVariant = useCallback(
+    async (imageUrl: string) => {
+      if (!currentScene) return
+      setError(null)
+      try {
+        const response = await fetch(`/api/scenes/${currentScene.id}/variants`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl }),
+        })
+        if (!response.ok) throw new Error(`Request failed: ${response.status}`)
+        const variant = (await response.json()) as SceneVariant
+        setCurrentScene((prev) =>
+          prev ? { ...prev, variants: [...(prev.variants ?? []), variant] } : prev,
+        )
+      } catch {
+        setError('create-failed')
+      }
+    },
+    [currentScene],
+  )
+
   const goToScene = useCallback(async (sceneId: string) => {
     setError(null)
     try {
@@ -114,5 +137,15 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     }).catch(() => {})
   }, [])
 
-  return { scenes, currentScene, isLoading, error, createFirstScene, createLink, goToScene, updateLinkPosition }
+  return {
+    scenes,
+    currentScene,
+    isLoading,
+    error,
+    createFirstScene,
+    createLink,
+    createVariant,
+    goToScene,
+    updateLinkPosition,
+  }
 }

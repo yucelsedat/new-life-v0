@@ -17,7 +17,7 @@ export default function Admin() {
   ]
 
   return (
-    <div className="min-h-screen w-full bg-void text-white/90">
+    <div className="scrollbar-none h-screen w-full overflow-y-auto bg-void text-white/90">
       <header className="flex flex-col gap-6 border-b border-white/10 px-6 py-8 md:px-12">
         <div className="flex items-center justify-between">
           <div>

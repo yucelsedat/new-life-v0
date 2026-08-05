@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { FiArrowLeft, FiImage, FiPlusCircle } from 'react-icons/fi'
+import { FiArrowLeft, FiCopy, FiGrid, FiImage, FiPlusCircle } from 'react-icons/fi'
 import { useT } from '../i18n'
 import { useWorldEditor } from '../hooks/useWorldEditor'
 import GalleryPickerModal from '../components/admin/GalleryPickerModal'
 import { clamp } from '../utils/helpers'
 import type { SceneLink } from '../types/world'
 
-type ModalMode = 'first-scene' | 'create-link' | null
+type ModalMode = 'first-scene' | 'create-link' | 'create-variant' | null
 
 interface ScenePinProps {
   link: SceneLink
@@ -69,8 +69,16 @@ function ScenePin({ link, containerRef, onDragEnd, onNavigate }: ScenePinProps) 
 export default function AdminWorldEditor() {
   const t = useT()
   const { worldId } = useParams<{ worldId: string }>()
-  const { scenes, currentScene, isLoading, createFirstScene, createLink, goToScene, updateLinkPosition } =
-    useWorldEditor(worldId ?? '')
+  const {
+    scenes,
+    currentScene,
+    isLoading,
+    createFirstScene,
+    createLink,
+    createVariant,
+    goToScene,
+    updateLinkPosition,
+  } = useWorldEditor(worldId ?? '')
 
   const [worldName, setWorldName] = useState<string | null>(null)
   const [modalMode, setModalMode] = useState<ModalMode>(null)
@@ -92,6 +100,8 @@ export default function AdminWorldEditor() {
         await createFirstScene(name, imageUrl)
       } else if (modalMode === 'create-link') {
         await createLink(name, imageUrl)
+      } else if (modalMode === 'create-variant') {
+        await createVariant(imageUrl)
       }
     } finally {
       setIsSubmitting(false)
@@ -100,6 +110,10 @@ export default function AdminWorldEditor() {
   }
 
   const hasNoScenes = !isLoading && scenes.length === 0
+  const variantCount = currentScene?.variants?.length ?? 0
+  const usedImageUrls = currentScene
+    ? [currentScene.imageUrl, ...(currentScene.variants ?? []).map((variant) => variant.imageUrl)]
+    : []
 
   return (
     <div className="relative h-screen max-h-screen w-screen overflow-hidden bg-void">
@@ -112,9 +126,19 @@ export default function AdminWorldEditor() {
           {t.admin.editor.backToWorlds}
         </Link>
 
-        <div className="text-right">
-          <p className="font-display text-h2 font-[300] text-white/95">{t.admin.editor.openingTitle}</p>
-          {worldName && <p className="font-sans text-caption text-mist">{worldName}</p>}
+        <div className="pointer-events-auto flex items-center gap-4">
+          <div className="text-right">
+            <p className="font-display text-h2 font-[300] text-white/95">{t.admin.editor.openingTitle}</p>
+            {worldName && <p className="font-sans text-caption text-mist">{worldName}</p>}
+          </div>
+
+          <Link
+            to={`/admin/worlds/${worldId}/canvas`}
+            className="flex items-center gap-2 rounded-full border border-white/15 bg-black/40 px-4 py-2 font-sans text-caption text-white/70 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
+          >
+            <FiGrid className="h-3.5 w-3.5" />
+            {t.admin.editor.canvasButton}
+          </Link>
         </div>
       </div>
 
@@ -153,20 +177,43 @@ export default function AdminWorldEditor() {
             />
           ))}
 
-          <button
-            type="button"
-            onClick={() => setModalMode('create-link')}
-            className="absolute bottom-8 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full bg-gradient-to-r from-gold to-gold-bright px-6 py-3 font-sans text-body font-[700] text-abyss shadow-lg transition hover:brightness-105"
-          >
-            <FiPlusCircle className="h-4 w-4" />
-            {t.admin.editor.createLinkButton}
-          </button>
+          <div className="absolute bottom-8 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setModalMode('create-link')}
+              className="flex items-center gap-2 rounded-full bg-gradient-to-r from-gold to-gold-bright px-6 py-3 font-sans text-body font-[700] text-abyss shadow-lg transition hover:brightness-105"
+            >
+              <FiPlusCircle className="h-4 w-4" />
+              {t.admin.editor.createLinkButton}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setModalMode('create-variant')}
+              className="flex items-center gap-2 rounded-full border border-white/15 bg-black/50 px-6 py-3 font-sans text-body font-[700] text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
+            >
+              <FiCopy className="h-4 w-4" />
+              {t.admin.editor.createOptionButton}
+              {variantCount > 0 && (
+                <span className="rounded-full bg-gold-bright px-2 py-0.5 font-mono text-micro text-abyss">
+                  {variantCount}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
       )}
 
       <GalleryPickerModal
         open={modalMode !== null}
-        nameLabel={modalMode === 'first-scene' ? t.admin.editor.modal.sceneNameLabel : t.admin.editor.modal.linkNameLabel}
+        nameLabel={
+          modalMode === 'create-variant'
+            ? null
+            : modalMode === 'first-scene'
+              ? t.admin.editor.modal.sceneNameLabel
+              : t.admin.editor.modal.linkNameLabel
+        }
+        usedUrls={modalMode === 'create-variant' ? usedImageUrls : []}
         isSubmitting={isSubmitting}
         onConfirm={handleModalConfirm}
         onCancel={() => setModalMode(null)}

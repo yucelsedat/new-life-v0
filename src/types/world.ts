@@ -54,13 +54,28 @@ export interface SceneLink {
   toSceneName?: string | null
 }
 
+export interface SceneVariant {
+  id: string
+  sceneId: string
+  imageUrl: string
+  createdAt: string
+}
+
 export interface WorldScene {
   id: string
   worldId: string
   name: string
   imageUrl: string
   createdAt: string
+  canvasX: number | null
+  canvasY: number | null
   links?: SceneLink[]
+  variants?: SceneVariant[]
+}
+
+export interface WorldSceneGraph {
+  scenes: WorldScene[]
+  links: SceneLink[]
 }
 
 export type QualityTier = 'hero' | 'satellite' | 'lite'
