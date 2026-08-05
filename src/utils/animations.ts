@@ -30,15 +30,6 @@ export const logoReveal: Variants = {
   },
 }
 
-export const slideFromLeft: Variants = {
-  hidden: { opacity: 0, x: -32 },
-  visible: {
-    opacity: 1,
-    x: 0,
-    transition: { duration: 0.8, ease: [0.16, 1, 0.3, 1] },
-  },
-}
-
 export const slideFromRight: Variants = {
   hidden: { opacity: 0, x: 32 },
   visible: {
