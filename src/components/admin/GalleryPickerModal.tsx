@@ -1,22 +1,35 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { FiX } from 'react-icons/fi'
+import { FiCheck, FiX } from 'react-icons/fi'
 import { useGalleryImages } from '../../hooks/useGalleryImages'
 import { useT } from '../../i18n'
 
 interface GalleryPickerModalProps {
   open: boolean
-  nameLabel: string
+  /** Label for the name input. Pass null to hide the name field entirely. */
+  nameLabel: string | null
   isSubmitting: boolean
+  /** Image URLs already in use — shown with a check badge and not selectable. */
+  usedUrls?: string[]
   onConfirm: (name: string, imageUrl: string) => void
   onCancel: () => void
 }
 
-export default function GalleryPickerModal({ open, nameLabel, isSubmitting, onConfirm, onCancel }: GalleryPickerModalProps) {
+export default function GalleryPickerModal({
+  open,
+  nameLabel,
+  isSubmitting,
+  usedUrls = [],
+  onConfirm,
+  onCancel,
+}: GalleryPickerModalProps) {
   const t = useT()
   const { images } = useGalleryImages()
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null)
   const [name, setName] = useState('')
+
+  const needsName = nameLabel !== null
+  const usedSet = new Set(usedUrls)
 
   function handleClose() {
     setSelectedUrl(null)
@@ -25,7 +38,8 @@ export default function GalleryPickerModal({ open, nameLabel, isSubmitting, onCo
   }
 
   function handleConfirm() {
-    if (!selectedUrl || !name.trim()) return
+    if (!selectedUrl) return
+    if (needsName && !name.trim()) return
     onConfirm(name.trim(), selectedUrl)
     setSelectedUrl(null)
     setName('')
@@ -61,32 +75,51 @@ export default function GalleryPickerModal({ open, nameLabel, isSubmitting, onCo
                 <p className="font-sans text-caption text-mist">{t.admin.editor.modal.empty}</p>
               ) : (
                 <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-                  {images.map((image) => (
-                    <button
-                      key={image.id}
-                      type="button"
-                      onClick={() => setSelectedUrl(image.url)}
-                      className={`overflow-hidden rounded-xl border-2 transition ${
-                        selectedUrl === image.url ? 'border-gold-bright' : 'border-transparent hover:border-white/20'
-                      }`}
-                    >
-                      <img src={image.url} alt={image.originalName} className="aspect-square w-full object-cover" />
-                    </button>
-                  ))}
+                  {images.map((image) => {
+                    const isUsed = usedSet.has(image.url)
+                    const isSelected = selectedUrl === image.url
+                    return (
+                      <button
+                        key={image.id}
+                        type="button"
+                        disabled={isUsed}
+                        title={isUsed ? t.admin.editor.modal.alreadyUsed : undefined}
+                        onClick={() => setSelectedUrl(image.url)}
+                        className={`relative overflow-hidden rounded-xl border-2 transition ${
+                          isSelected ? 'border-gold-bright' : 'border-transparent hover:border-white/20'
+                        } ${isUsed ? 'cursor-not-allowed' : ''}`}
+                      >
+                        <img
+                          src={image.url}
+                          alt={image.originalName}
+                          className={`aspect-square w-full object-cover transition ${isUsed ? 'opacity-35' : ''}`}
+                        />
+                        {isUsed && (
+                          <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-gold-bright text-abyss">
+                            <FiCheck className="h-3.5 w-3.5" />
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>
 
             <div className="flex items-center gap-3 border-t border-white/10 px-6 py-4">
-              <label className="flex flex-1 flex-col gap-1.5">
-                <span className="font-sans text-caption font-[700] text-white/70">{nameLabel}</span>
-                <input
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  placeholder={t.admin.editor.modal.namePlaceholder}
-                  className="rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 font-sans text-body text-white/90 outline-none transition focus:border-gold-bright"
-                />
-              </label>
+              {needsName ? (
+                <label className="flex flex-1 flex-col gap-1.5">
+                  <span className="font-sans text-caption font-[700] text-white/70">{nameLabel}</span>
+                  <input
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder={t.admin.editor.modal.namePlaceholder}
+                    className="rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 font-sans text-body text-white/90 outline-none transition focus:border-gold-bright"
+                  />
+                </label>
+              ) : (
+                <div className="flex-1" />
+              )}
 
               <button
                 type="button"
@@ -99,7 +132,7 @@ export default function GalleryPickerModal({ open, nameLabel, isSubmitting, onCo
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={!selectedUrl || !name.trim() || isSubmitting}
+                disabled={!selectedUrl || (needsName && !name.trim()) || isSubmitting}
                 className="rounded-xl bg-gradient-to-r from-gold to-gold-bright px-5 py-3 font-sans text-body font-[700] text-abyss transition disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isSubmitting ? t.admin.editor.creating : t.admin.editor.modal.confirm}

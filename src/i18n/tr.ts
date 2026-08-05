@@ -75,6 +75,9 @@ export const tr = {
       createLinkButton: 'Sahne Linki Oluştur',
       creating: 'Oluşturuluyor…',
       loadError: 'Sahne yüklenemedi.',
+      canvasButton: 'Canvas',
+      createOptionButton: 'Seçenek Oluştur',
+      optionCount: 'seçenek',
       modal: {
         sceneNameLabel: 'Sahne Adı',
         linkNameLabel: 'Link Adı',
@@ -83,7 +86,18 @@ export const tr = {
         confirm: 'Oluştur',
         cancel: 'Vazgeç',
         empty: 'Galeride görsel yok. Önce Galeri sekmesinden görsel yükle.',
+        alreadyUsed: 'Bu görsel bu sahnede zaten kullanılıyor',
       },
+    },
+    canvas: {
+      backToEditor: 'Editöre Dön',
+      addScene: 'Yeni Sahne',
+      connectHint: 'Bağlamak istediğin sahneye tıkla',
+      connectCancel: 'Bağlamayı İptal Et',
+      connectModalTitle: 'Sahneleri Bağla',
+      linkNameLabel: 'Link Adı',
+      confirm: 'Bağla',
+      cancel: 'Vazgeç',
     },
     gallery: {
       title: 'Sahne Galerisi',

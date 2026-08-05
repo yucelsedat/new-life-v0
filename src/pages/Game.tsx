@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useWorldEditor } from '../hooks/useWorldEditor'
 import type { SceneLink } from '../types/world'
@@ -22,6 +23,26 @@ export default function Game() {
   const { worldId } = useParams<{ worldId: string }>()
   const { currentScene, isLoading, scenes, goToScene } = useWorldEditor(worldId ?? '')
 
+  /** How many times each scene has been entered this session — drives variant cycling. */
+  const [visitCounts, setVisitCounts] = useState<Record<string, number>>({})
+
+  const currentSceneId = currentScene?.id
+  useEffect(() => {
+    if (!currentSceneId) return
+    setVisitCounts((prev) => ({ ...prev, [currentSceneId]: (prev[currentSceneId] ?? 0) + 1 }))
+  }, [currentSceneId])
+
+  /**
+   * First visit shows the scene's base image; each subsequent visit advances to the
+   * next configured option, wrapping back around to the base image.
+   */
+  const displayedImageUrl = useMemo(() => {
+    if (!currentScene) return null
+    const options = [currentScene.imageUrl, ...(currentScene.variants ?? []).map((variant) => variant.imageUrl)]
+    const visits = visitCounts[currentScene.id] ?? 1
+    return options[(visits - 1) % options.length]
+  }, [currentScene, visitCounts])
+
   return (
     <div className="relative h-screen max-h-screen w-screen overflow-hidden bg-void">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-6 py-5">
@@ -42,10 +63,11 @@ export default function Game() {
         </div>
       )}
 
-      {currentScene && (
+      {currentScene && displayedImageUrl && (
         <div className="relative h-full max-h-screen w-full">
           <img
-            src={currentScene.imageUrl}
+            key={displayedImageUrl}
+            src={displayedImageUrl}
             alt={currentScene.name}
             className="absolute inset-0 h-full max-h-screen w-full object-cover"
           />

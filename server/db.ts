@@ -59,4 +59,19 @@ db.exec(`
     position_y REAL NOT NULL DEFAULT 50,
     created_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS scene_variants (
+    id TEXT PRIMARY KEY,
+    scene_id TEXT NOT NULL,
+    image_url TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
 `)
+
+for (const column of ['canvas_x', 'canvas_y']) {
+  try {
+    db.exec(`ALTER TABLE scenes ADD COLUMN ${column} REAL`)
+  } catch {
+    // column already exists
+  }
+}
