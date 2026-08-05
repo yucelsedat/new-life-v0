@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
-import { FiCheck, FiClipboard, FiTrash2, FiUploadCloud } from 'react-icons/fi'
+import { FiCheck, FiClipboard, FiLink, FiTrash2, FiUploadCloud } from 'react-icons/fi'
 import { useT } from '../../i18n'
 import { useGalleryImages, type GalleryScope } from '../../hooks/useGalleryImages'
 import { useImagePaste } from '../../hooks/useImagePaste'
@@ -22,26 +22,41 @@ interface ImageCardProps {
 }
 
 function ImageCard({ image, isSelected, onToggle }: ImageCardProps) {
+  const t = useT()
+
   return (
     <button
       type="button"
-      onClick={onToggle}
+      onClick={image.inUse ? undefined : onToggle}
       aria-pressed={isSelected}
+      aria-disabled={image.inUse}
+      title={image.inUse ? t.admin.gallery.inUseTooltip : undefined}
       className={`group relative overflow-hidden rounded-2xl border bg-black/30 text-left backdrop-blur-xl transition ${
-        isSelected ? 'border-gold-bright ring-2 ring-gold-bright/40' : 'border-white/10 hover:border-white/25'
+        image.inUse
+          ? 'cursor-default border-white/10'
+          : isSelected
+            ? 'border-gold-bright ring-2 ring-gold-bright/40'
+            : 'border-white/10 hover:border-white/25'
       }`}
     >
       <img src={image.url} alt={image.originalName} className="aspect-square w-full object-cover" />
 
-      <span
-        className={`absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full border transition ${
-          isSelected
-            ? 'border-gold-bright bg-gold-bright text-abyss'
-            : 'border-white/40 bg-black/40 text-transparent opacity-0 group-hover:opacity-100'
-        }`}
-      >
-        <FiCheck className="h-3.5 w-3.5" />
-      </span>
+      {image.inUse ? (
+        <span className="absolute left-3 top-3 flex items-center gap-1.5 rounded-full border border-gold-bright/40 bg-black/70 px-2.5 py-1 font-sans text-micro font-[700] text-gold-bright backdrop-blur-sm">
+          <FiLink className="h-3 w-3" />
+          {t.admin.gallery.inUseBadge}
+        </span>
+      ) : (
+        <span
+          className={`absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full border transition ${
+            isSelected
+              ? 'border-gold-bright bg-gold-bright text-abyss'
+              : 'border-white/40 bg-black/40 text-transparent opacity-0 group-hover:opacity-100'
+          }`}
+        >
+          <FiCheck className="h-3.5 w-3.5" />
+        </span>
+      )}
 
       <span className="block px-4 py-3">
         <span className="block truncate font-sans text-caption font-[700] text-white/85">{image.originalName}</span>
@@ -188,7 +203,7 @@ export default function ImageLibrarySection({ title, subtitle, emptyLabel, scope
               </span>
               <button
                 type="button"
-                onClick={() => setSelectedIds(images.map((image) => image.id))}
+                onClick={() => setSelectedIds(images.filter((image) => !image.inUse).map((image) => image.id))}
                 className="font-sans text-caption text-white/60 underline-offset-4 transition hover:text-white hover:underline"
               >
                 {t.admin.gallery.selectAll}

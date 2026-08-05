@@ -142,6 +142,8 @@ export const tr = {
       uploadError: 'Yükleme başarısız oldu. Lütfen tekrar deneyin.',
       pasteHint: 'Bu alana tıkla, sonra Ctrl+V ile kopyaladığın görseli yapıştır.',
       pasteActive: 'Hazır — Ctrl+V ile görseli buraya yapıştırabilirsin.',
+      inUseBadge: 'Kullanımda',
+      inUseTooltip: 'Bu görsel bir sahnede, seçenekte, hikayede veya dünya kapağında kullanılıyor — silinemez.',
       selectedCount: '{n} görsel seçildi',
       selectAll: 'Tümünü Seç',
       clearSelection: 'Seçimi Temizle',

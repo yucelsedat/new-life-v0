@@ -50,7 +50,7 @@ interface ImageRow {
   kind: string
 }
 
-function toImage(row: ImageRow) {
+function toImage(row: ImageRow, inUse = false) {
   return {
     id: row.id,
     url: row.url,
@@ -59,7 +59,26 @@ function toImage(row: ImageRow) {
     uploadedAt: row.uploaded_at,
     worldId: row.world_id,
     kind: row.kind,
+    inUse,
   }
+}
+
+/**
+ * Every place an image URL can be consumed. One definition serves both the `inUse`
+ * flag the library shows and the deletion guard — a used image must never be removed.
+ * `urlExpr` is the SQL expression holding the URL: a `?` placeholder when checking one
+ * image, or `images.url` when correlating with the row being listed.
+ */
+function imageUsageSql(urlExpr: '?' | 'images.url'): string {
+  return `
+    SELECT 1 FROM scenes WHERE image_url = ${urlExpr}
+    UNION ALL
+    SELECT 1 FROM scene_variants WHERE image_url = ${urlExpr}
+    UNION ALL
+    SELECT 1 FROM story_frames WHERE image_url = ${urlExpr}
+    UNION ALL
+    SELECT 1 FROM worlds WHERE scene_image_url = ${urlExpr}
+  `
 }
 
 /**
@@ -94,9 +113,12 @@ galleryRouter.get('/', (req, res) => {
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
   const rows = db
-    .prepare(`SELECT * FROM images ${where} ORDER BY uploaded_at DESC`)
-    .all(...params) as ImageRow[]
-  res.json(rows.map(toImage))
+    .prepare(
+      `SELECT images.*, EXISTS(${imageUsageSql('images.url')}) AS in_use
+       FROM images ${where} ORDER BY uploaded_at DESC`,
+    )
+    .all(...params) as (ImageRow & { in_use: number })[]
+  res.json(rows.map((row) => toImage(row, row.in_use === 1)))
 })
 
 galleryRouter.post('/', (req, res) => {
@@ -151,20 +173,8 @@ galleryRouter.post('/', (req, res) => {
   })
 })
 
-/** Every place an image URL can be consumed — a used image must not be deleted. */
 function isUrlInUse(url: string): boolean {
-  const hit = db
-    .prepare(
-      `SELECT 1 FROM scenes WHERE image_url = ?
-       UNION ALL
-       SELECT 1 FROM scene_variants WHERE image_url = ?
-       UNION ALL
-       SELECT 1 FROM story_frames WHERE image_url = ?
-       UNION ALL
-       SELECT 1 FROM worlds WHERE scene_image_url = ?
-       LIMIT 1`,
-    )
-    .get(url, url, url, url)
+  const hit = db.prepare(`${imageUsageSql('?')} LIMIT 1`).get(url, url, url, url)
   return hit !== undefined
 }
 

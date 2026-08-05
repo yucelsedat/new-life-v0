@@ -46,6 +46,8 @@ export interface GalleryImage {
   /** null = global library (not tied to a world) */
   worldId: string | null
   kind: ImageKind
+  /** True when a scene, option, story frame or world cover points at this image — it cannot be deleted. */
+  inUse: boolean
 }
 
 export interface SceneLink {
