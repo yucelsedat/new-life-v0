@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { FiCheck, FiX } from 'react-icons/fi'
+import { FiX } from 'react-icons/fi'
 import { useGalleryImages, type GalleryScope } from '../../hooks/useGalleryImages'
 import { useT } from '../../i18n'
 
@@ -9,8 +9,8 @@ interface GalleryPickerModalProps {
   /** Label for the name input. Pass null to hide the name field entirely. */
   nameLabel: string | null
   isSubmitting: boolean
-  /** Image URLs already in use — shown with a check badge and not selectable. */
-  usedUrls?: string[]
+  /** Image URLs already used in this world — hidden from the grid entirely. */
+  hiddenUrls?: string[]
   /** Which image library to pick from. */
   scope: GalleryScope
   onConfirm: (name: string, imageUrl: string) => void
@@ -21,7 +21,7 @@ export default function GalleryPickerModal({
   open,
   nameLabel,
   isSubmitting,
-  usedUrls = [],
+  hiddenUrls = [],
   scope,
   onConfirm,
   onCancel,
@@ -32,7 +32,8 @@ export default function GalleryPickerModal({
   const [name, setName] = useState('')
 
   const needsName = nameLabel !== null
-  const usedSet = new Set(usedUrls)
+  const hiddenSet = new Set(hiddenUrls)
+  const available = images.filter((image) => !hiddenSet.has(image.url))
 
   function handleClose() {
     setSelectedUrl(null)
@@ -74,34 +75,28 @@ export default function GalleryPickerModal({
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-5">
-              {images.length === 0 ? (
-                <p className="font-sans text-caption text-mist">{t.admin.editor.modal.empty}</p>
+              {available.length === 0 ? (
+                <p className="font-sans text-caption text-mist">
+                  {images.length === 0 ? t.admin.editor.modal.empty : t.admin.editor.modal.allUsed}
+                </p>
               ) : (
                 <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-                  {images.map((image) => {
-                    const isUsed = usedSet.has(image.url)
+                  {available.map((image) => {
                     const isSelected = selectedUrl === image.url
                     return (
                       <button
                         key={image.id}
                         type="button"
-                        disabled={isUsed}
-                        title={isUsed ? t.admin.editor.modal.alreadyUsed : undefined}
                         onClick={() => setSelectedUrl(image.url)}
                         className={`relative overflow-hidden rounded-xl border-2 transition ${
                           isSelected ? 'border-gold-bright' : 'border-transparent hover:border-white/20'
-                        } ${isUsed ? 'cursor-not-allowed' : ''}`}
+                        }`}
                       >
                         <img
                           src={image.url}
                           alt={image.originalName}
-                          className={`aspect-square w-full object-cover transition ${isUsed ? 'opacity-35' : ''}`}
+                          className="aspect-square w-full object-cover"
                         />
-                        {isUsed && (
-                          <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-gold-bright text-abyss">
-                            <FiCheck className="h-3.5 w-3.5" />
-                          </span>
-                        )}
                       </button>
                     )
                   })}

@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { FiArrowLeft, FiCopy, FiGrid, FiImage, FiPlusCircle } from 'react-icons/fi'
+import { FiArrowLeft, FiArrowRight, FiBookOpen, FiCopy, FiGrid, FiImage, FiPlusCircle, FiRefreshCw } from 'react-icons/fi'
 import { useT } from '../i18n'
 import { useWorldEditor } from '../hooks/useWorldEditor'
+import { useUsedImages } from '../hooks/useUsedImages'
 import GalleryPickerModal from '../components/admin/GalleryPickerModal'
+import StoryPickerModal from '../components/admin/StoryPickerModal'
 import { clamp } from '../utils/helpers'
 import type { SceneLink } from '../types/world'
 
-type ModalMode = 'first-scene' | 'create-link' | 'create-variant' | null
+type ModalMode = 'first-scene' | 'create-link' | 'create-variant' | 'change-image' | null
 
 interface ScenePinProps {
   link: SceneLink
@@ -76,12 +78,20 @@ export default function AdminWorldEditor() {
     createFirstScene,
     createLink,
     createVariant,
+    saveStory,
+    changeOptionImage,
     goToScene,
     updateLinkPosition,
   } = useWorldEditor(worldId ?? '')
+  const { usedUrls, refetchUsed } = useUsedImages(worldId ?? '')
 
   const [worldName, setWorldName] = useState<string | null>(null)
   const [modalMode, setModalMode] = useState<ModalMode>(null)
+  /** 'base' = the scene's own image, otherwise a variant id. */
+  const [activeOption, setActiveOption] = useState<string>('base')
+  /** -1 = showing the option image itself; 0..n-1 = story frame index. */
+  const [storyIndex, setStoryIndex] = useState(-1)
+  const [storyModalOpen, setStoryModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const backgroundRef = useRef<HTMLDivElement>(null)
 
@@ -93,6 +103,24 @@ export default function AdminWorldEditor() {
       .catch(() => setWorldName(null))
   }, [worldId])
 
+  const currentSceneId = currentScene?.id
+  useEffect(() => {
+    setActiveOption('base')
+    setStoryIndex(-1)
+  }, [currentSceneId])
+
+  async function handleStoryConfirm(imageUrls: string[]) {
+    setIsSubmitting(true)
+    try {
+      await saveStory(activeOption, imageUrls)
+      setStoryIndex(-1)
+      await refetchUsed()
+    } finally {
+      setIsSubmitting(false)
+      setStoryModalOpen(false)
+    }
+  }
+
   async function handleModalConfirm(name: string, imageUrl: string) {
     setIsSubmitting(true)
     try {
@@ -102,7 +130,10 @@ export default function AdminWorldEditor() {
         await createLink(name, imageUrl)
       } else if (modalMode === 'create-variant') {
         await createVariant(imageUrl)
+      } else if (modalMode === 'change-image') {
+        await changeOptionImage(activeOption, imageUrl)
       }
+      await refetchUsed()
     } finally {
       setIsSubmitting(false)
       setModalMode(null)
@@ -111,9 +142,26 @@ export default function AdminWorldEditor() {
 
   const hasNoScenes = !isLoading && scenes.length === 0
   const variantCount = currentScene?.variants?.length ?? 0
-  const usedImageUrls = currentScene
-    ? [currentScene.imageUrl, ...(currentScene.variants ?? []).map((variant) => variant.imageUrl)]
+
+  // The option strip: the scene image first, then each variant in creation order.
+  const options = currentScene
+    ? [
+        { key: 'base', imageUrl: currentScene.imageUrl, label: t.admin.editor.baseOption },
+        ...(currentScene.variants ?? []).map((variant, index) => ({
+          key: variant.id,
+          imageUrl: variant.imageUrl,
+          label: `${t.admin.editor.optionShort} ${index + 1}`,
+        })),
+      ]
     : []
+  const activeOptionImage = options.find((option) => option.key === activeOption)?.imageUrl ?? currentScene?.imageUrl
+  const storyFrames = currentScene?.stories?.[activeOption] ?? []
+  // Advancing walks off the option image and through the story, stopping on the last frame.
+  const displayedImage = storyIndex >= 0 ? storyFrames[storyIndex]?.imageUrl ?? activeOptionImage : activeOptionImage
+  const canAdvance = storyFrames.length > 0 && storyIndex < storyFrames.length - 1
+  // Links belong at the end of the narrative: with a story they surface on its last
+  // frame, otherwise straight away on the option image.
+  const showLinks = storyFrames.length === 0 ? storyIndex < 0 : storyIndex === storyFrames.length - 1
 
   return (
     <div className="relative h-screen max-h-screen w-screen overflow-hidden bg-void">
@@ -162,12 +210,13 @@ export default function AdminWorldEditor() {
       {currentScene && (
         <div ref={backgroundRef} className="relative h-full max-h-screen w-full">
           <img
-            src={currentScene.imageUrl}
+            key={displayedImage}
+            src={displayedImage}
             alt={currentScene.name}
             className="absolute inset-0 h-full max-h-screen w-full object-cover"
           />
 
-          {(currentScene.links ?? []).map((link) => (
+          {showLinks && (currentScene.links ?? []).map((link) => (
             <ScenePin
               key={link.id}
               link={link}
@@ -177,22 +226,81 @@ export default function AdminWorldEditor() {
             />
           ))}
 
-          <div className="absolute bottom-8 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center gap-2">
+          {options.length > 1 && (
+            <div className="absolute left-1/2 top-24 z-20 flex -translate-x-1/2 items-center gap-2 rounded-2xl border border-white/10 bg-black/50 p-2 backdrop-blur-md">
+              {options.map((option) => {
+                const hasStory = (currentScene.stories?.[option.key]?.length ?? 0) > 0
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    title={option.label}
+                    onClick={() => {
+                      setActiveOption(option.key)
+                      setStoryIndex(-1)
+                    }}
+                    className={`relative h-12 w-16 overflow-hidden rounded-lg border-2 transition ${
+                      activeOption === option.key ? 'border-gold-bright' : 'border-transparent hover:border-white/25'
+                    }`}
+                  >
+                    <img src={option.imageUrl} alt={option.label} className="h-full w-full object-cover" />
+                    {hasStory && (
+                      <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold-bright">
+                        <FiBookOpen className="h-2.5 w-2.5 text-abyss" />
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
+          {canAdvance && (
+            <button
+              type="button"
+              onClick={() => setStoryIndex((prev) => prev + 1)}
+              className="absolute right-8 top-1/2 z-20 flex -translate-y-1/2 items-center gap-2 rounded-full bg-gradient-to-r from-gold to-gold-bright px-4 py-3 font-sans text-caption font-[700] text-abyss shadow-lg transition hover:brightness-105"
+            >
+              {t.admin.story.advance}
+              <FiArrowRight className="h-4 w-4" />
+            </button>
+          )}
+
+          {storyFrames.length > 0 && (
+            <span className="absolute bottom-8 right-8 z-20 rounded-full border border-white/15 bg-black/60 px-3 py-1.5 font-mono text-micro text-white/80 backdrop-blur-md">
+              {t.admin.story.frameCounter
+                .replace('{i}', String(storyIndex + 1))
+                .replace('{n}', String(storyFrames.length))}
+            </span>
+          )}
+
+          <div className="absolute bottom-6 left-6 z-20 flex flex-col items-start gap-1.5">
+            {storyIndex < 0 && (
+              <button
+                type="button"
+                onClick={() => setModalMode('change-image')}
+                className="flex items-center gap-2 rounded-full border border-white/15 bg-black/50 px-4 py-2 font-sans text-caption font-[700] text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
+              >
+                <FiRefreshCw className="h-3.5 w-3.5" />
+                {t.admin.editor.changeSceneButton}
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setModalMode('create-link')}
-              className="flex items-center gap-2 rounded-full bg-gradient-to-r from-gold to-gold-bright px-6 py-3 font-sans text-body font-[700] text-abyss shadow-lg transition hover:brightness-105"
+              className="flex items-center gap-2 rounded-full bg-gradient-to-r from-gold to-gold-bright px-4 py-2 font-sans text-caption font-[700] text-abyss shadow-lg transition hover:brightness-105"
             >
-              <FiPlusCircle className="h-4 w-4" />
+              <FiPlusCircle className="h-3.5 w-3.5" />
               {t.admin.editor.createLinkButton}
             </button>
 
             <button
               type="button"
               onClick={() => setModalMode('create-variant')}
-              className="flex items-center gap-2 rounded-full border border-white/15 bg-black/50 px-6 py-3 font-sans text-body font-[700] text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
+              className="flex items-center gap-2 rounded-full border border-white/15 bg-black/50 px-4 py-2 font-sans text-caption font-[700] text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
             >
-              <FiCopy className="h-4 w-4" />
+              <FiCopy className="h-3.5 w-3.5" />
               {t.admin.editor.createOptionButton}
               {variantCount > 0 && (
                 <span className="rounded-full bg-gold-bright px-2 py-0.5 font-mono text-micro text-abyss">
@@ -200,21 +308,45 @@ export default function AdminWorldEditor() {
                 </span>
               )}
             </button>
+
+            <button
+              type="button"
+              onClick={() => setStoryModalOpen(true)}
+              className="flex items-center gap-2 rounded-full border border-white/15 bg-black/50 px-4 py-2 font-sans text-caption font-[700] text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
+            >
+              <FiBookOpen className="h-3.5 w-3.5" />
+              {t.admin.editor.createStoryButton}
+              {storyFrames.length > 0 && (
+                <span className="rounded-full bg-gold-bright px-2 py-0.5 font-mono text-micro text-abyss">
+                  {storyFrames.length}
+                </span>
+              )}
+            </button>
           </div>
         </div>
       )}
+
+      <StoryPickerModal
+        open={storyModalOpen}
+        isSubmitting={isSubmitting}
+        scope={{ worldId, kind: 'scene' }}
+        initialUrls={storyFrames.map((frame) => frame.imageUrl)}
+        hiddenUrls={usedUrls}
+        onConfirm={handleStoryConfirm}
+        onCancel={() => setStoryModalOpen(false)}
+      />
 
       <GalleryPickerModal
         scope={{ worldId, kind: 'scene' }}
         open={modalMode !== null}
         nameLabel={
-          modalMode === 'create-variant'
+          modalMode === 'create-variant' || modalMode === 'change-image'
             ? null
             : modalMode === 'first-scene'
               ? t.admin.editor.modal.sceneNameLabel
               : t.admin.editor.modal.linkNameLabel
         }
-        usedUrls={modalMode === 'create-variant' ? usedImageUrls : []}
+        hiddenUrls={usedUrls}
         isSubmitting={isSubmitting}
         onConfirm={handleModalConfirm}
         onCancel={() => setModalMode(null)}

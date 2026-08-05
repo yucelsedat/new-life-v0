@@ -107,6 +107,30 @@ worldsRouter.patch('/:id', (req, res) => {
   res.json(toWorld(row))
 })
 
+/**
+ * Every image URL this world already consumes — as a scene background, a scene
+ * option, or a story frame. Editor pickers use it to hide images already in use.
+ */
+worldsRouter.get('/:id/used-images', (req, res) => {
+  const world = db.prepare('SELECT id FROM worlds WHERE id = ?').get(req.params.id)
+  if (!world) {
+    res.status(404).json({ error: 'World not found' })
+    return
+  }
+
+  const rows = db
+    .prepare(
+      `SELECT image_url FROM scenes WHERE world_id = ?
+       UNION
+       SELECT image_url FROM scene_variants WHERE scene_id IN (SELECT id FROM scenes WHERE world_id = ?)
+       UNION
+       SELECT image_url FROM story_frames WHERE scene_id IN (SELECT id FROM scenes WHERE world_id = ?)`,
+    )
+    .all(req.params.id, req.params.id, req.params.id) as { image_url: string }[]
+
+  res.json({ urls: rows.map((row) => row.image_url) })
+})
+
 /** What a delete would take with it — shown in the confirmation dialog. */
 worldsRouter.get('/:id/deletion-summary', (req, res) => {
   const world = db.prepare('SELECT * FROM worlds WHERE id = ?').get(req.params.id) as WorldRow | undefined
@@ -130,6 +154,11 @@ worldsRouter.get('/:id/deletion-summary', (req, res) => {
         .prepare(`SELECT COUNT(*) c FROM scene_variants WHERE scene_id IN (${placeholders})`)
         .get(...sceneIds) as { c: number }).c
     : 0
+  const storyFrameCount = sceneIds.length
+    ? (db
+        .prepare(`SELECT COUNT(*) c FROM story_frames WHERE scene_id IN (${placeholders})`)
+        .get(...sceneIds) as { c: number }).c
+    : 0
   const imageCount = (
     db.prepare('SELECT COUNT(*) c FROM images WHERE world_id = ?').get(req.params.id) as { c: number }
   ).c
@@ -139,6 +168,7 @@ worldsRouter.get('/:id/deletion-summary', (req, res) => {
     scenes: sceneIds.length,
     links: linkCount,
     variants: variantCount,
+    storyFrames: storyFrameCount,
     images: imageCount,
   })
 })
@@ -161,6 +191,7 @@ worldsRouter.delete('/:id', (req, res) => {
 
   if (sceneIds.length) {
     const placeholders = sceneIds.map(() => '?').join(',')
+    db.prepare(`DELETE FROM story_frames WHERE scene_id IN (${placeholders})`).run(...sceneIds)
     db.prepare(`DELETE FROM scene_variants WHERE scene_id IN (${placeholders})`).run(...sceneIds)
     db.prepare(
       `DELETE FROM scene_links WHERE from_scene_id IN (${placeholders}) OR to_scene_id IN (${placeholders})`,
@@ -170,7 +201,11 @@ worldsRouter.delete('/:id', (req, res) => {
   db.prepare('DELETE FROM images WHERE world_id = ?').run(req.params.id)
   db.prepare('DELETE FROM worlds WHERE id = ?').run(req.params.id)
 
+  // Delete a file only once no image record anywhere still points at it — the same
+  // upload can be referenced by another world or by the global character library.
+  const stillReferenced = db.prepare('SELECT 1 FROM images WHERE filename = ? LIMIT 1')
   for (const image of worldImages) {
+    if (stillReferenced.get(image.filename)) continue
     try {
       rmSync(join(uploadsDir, image.filename))
     } catch {

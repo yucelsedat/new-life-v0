@@ -66,6 +66,17 @@ export interface SceneVariant {
   createdAt: string
 }
 
+export interface StoryFrame {
+  id: string
+  sceneId: string
+  variantId: string | null
+  imageUrl: string
+  position: number
+}
+
+/** Key is a variant id, or 'base' for the scene's own image. */
+export type SceneStories = Record<string, StoryFrame[]>
+
 export interface WorldScene {
   id: string
   worldId: string
@@ -76,6 +87,7 @@ export interface WorldScene {
   canvasY: number | null
   links?: SceneLink[]
   variants?: SceneVariant[]
+  stories?: SceneStories
 }
 
 export interface WorldSceneGraph {

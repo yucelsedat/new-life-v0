@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { SceneLink, SceneVariant, WorldScene } from '../types/world'
+import type { SceneLink, SceneVariant, StoryFrame, WorldScene } from '../types/world'
 
 export interface UseWorldEditorResult {
   scenes: WorldScene[]
@@ -9,6 +9,8 @@ export interface UseWorldEditorResult {
   createFirstScene: (name: string, imageUrl: string) => Promise<void>
   createLink: (label: string, imageUrl: string, positionX?: number, positionY?: number) => Promise<void>
   createVariant: (imageUrl: string) => Promise<void>
+  saveStory: (variantKey: string, imageUrls: string[]) => Promise<void>
+  changeOptionImage: (variantKey: string, imageUrl: string) => Promise<void>
   goToScene: (sceneId: string) => Promise<void>
   updateLinkPosition: (linkId: string, positionX: number, positionY: number) => void
 }
@@ -114,6 +116,62 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     [currentScene],
   )
 
+  const saveStory = useCallback(
+    async (variantKey: string, imageUrls: string[]) => {
+      if (!currentScene) return
+      setError(null)
+      try {
+        const response = await fetch(`/api/scenes/${currentScene.id}/story`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ variantId: variantKey, imageUrls }),
+        })
+        if (!response.ok) throw new Error(`Request failed: ${response.status}`)
+        const { frames } = (await response.json()) as { variantId: string; frames: StoryFrame[] }
+        setCurrentScene((prev) =>
+          prev ? { ...prev, stories: { ...(prev.stories ?? {}), [variantKey]: frames } } : prev,
+        )
+      } catch {
+        setError('create-failed')
+      }
+    },
+    [currentScene],
+  )
+
+  /** Swap the image behind the active option — the scene itself, or one of its variants. */
+  const changeOptionImage = useCallback(
+    async (variantKey: string, imageUrl: string) => {
+      if (!currentScene) return
+      setError(null)
+      const url =
+        variantKey === 'base'
+          ? `/api/scenes/${currentScene.id}/image`
+          : `/api/scenes/${currentScene.id}/variants/${variantKey}/image`
+      try {
+        const response = await fetch(url, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageUrl }),
+        })
+        if (!response.ok) throw new Error(`Request failed: ${response.status}`)
+        setCurrentScene((prev) => {
+          if (!prev) return prev
+          if (variantKey === 'base') return { ...prev, imageUrl }
+          return {
+            ...prev,
+            variants: (prev.variants ?? []).map((v) => (v.id === variantKey ? { ...v, imageUrl } : v)),
+          }
+        })
+        setScenes((prev) =>
+          variantKey === 'base' ? prev.map((s) => (s.id === currentScene.id ? { ...s, imageUrl } : s)) : prev,
+        )
+      } catch {
+        setError('update-failed')
+      }
+    },
+    [currentScene],
+  )
+
   const goToScene = useCallback(async (sceneId: string) => {
     setError(null)
     try {
@@ -145,6 +203,8 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     createFirstScene,
     createLink,
     createVariant,
+    saveStory,
+    changeOptionImage,
     goToScene,
     updateLinkPosition,
   }

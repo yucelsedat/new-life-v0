@@ -12,6 +12,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { FiArrowLeft, FiImage, FiLink, FiMinus, FiPlus, FiX } from 'react-icons/fi'
 import { useT } from '../i18n'
 import { useWorldCanvas } from '../hooks/useWorldCanvas'
+import { useUsedImages } from '../hooks/useUsedImages'
 import GalleryPickerModal from '../components/admin/GalleryPickerModal'
 import { clamp } from '../utils/helpers'
 import type { SceneLink, WorldScene } from '../types/world'
@@ -213,6 +214,7 @@ export default function AdminWorldCanvas() {
   const t = useT()
   const { worldId } = useParams<{ worldId: string }>()
   const { scenes, links, isLoading, createScene, connectScenes, updateScenePosition } = useWorldCanvas(worldId ?? '')
+  const { usedUrls, refetchUsed } = useUsedImages(worldId ?? '')
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [pan, setPan] = useState<Vec2>({ x: 80, y: 80 })
@@ -328,6 +330,7 @@ export default function AdminWorldCanvas() {
       const cx = rect ? (rect.width / 2 - pan.x) / zoom : 200
       const cy = rect ? (rect.height / 2 - pan.y) / zoom : 200
       await createScene(name, imageUrl, cx, cy)
+      await refetchUsed()
     } finally {
       setIsSubmitting(false)
       setAddSceneOpen(false)
@@ -461,6 +464,7 @@ export default function AdminWorldCanvas() {
 
       <GalleryPickerModal
         scope={{ worldId, kind: 'scene' }}
+        hiddenUrls={usedUrls}
         open={addSceneOpen}
         nameLabel={t.admin.editor.modal.sceneNameLabel}
         isSubmitting={isSubmitting}

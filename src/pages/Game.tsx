@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { FiArrowRight } from 'react-icons/fi'
 import { useWorldEditor } from '../hooks/useWorldEditor'
 import type { SceneLink } from '../types/world'
 
@@ -32,16 +33,32 @@ export default function Game() {
     setVisitCounts((prev) => ({ ...prev, [currentSceneId]: (prev[currentSceneId] ?? 0) + 1 }))
   }, [currentSceneId])
 
+  /** -1 = showing the option image; 0..n-1 = a story frame of the active option. */
+  const [storyIndex, setStoryIndex] = useState(-1)
+  useEffect(() => {
+    setStoryIndex(-1)
+  }, [currentSceneId])
+
   /**
    * First visit shows the scene's base image; each subsequent visit advances to the
    * next configured option, wrapping back around to the base image.
    */
-  const displayedImageUrl = useMemo(() => {
+  const activeOption = useMemo(() => {
     if (!currentScene) return null
-    const options = [currentScene.imageUrl, ...(currentScene.variants ?? []).map((variant) => variant.imageUrl)]
+    const options = [
+      { key: 'base', imageUrl: currentScene.imageUrl },
+      ...(currentScene.variants ?? []).map((variant) => ({ key: variant.id, imageUrl: variant.imageUrl })),
+    ]
     const visits = visitCounts[currentScene.id] ?? 1
     return options[(visits - 1) % options.length]
   }, [currentScene, visitCounts])
+
+  const storyFrames = activeOption ? (currentScene?.stories?.[activeOption.key] ?? []) : []
+  const canAdvance = storyFrames.length > 0 && storyIndex < storyFrames.length - 1
+  // With a story configured, the exits only appear once the player reaches its last frame.
+  const showLinks = storyFrames.length === 0 ? storyIndex < 0 : storyIndex === storyFrames.length - 1
+  const displayedImageUrl =
+    storyIndex >= 0 ? (storyFrames[storyIndex]?.imageUrl ?? activeOption?.imageUrl ?? null) : (activeOption?.imageUrl ?? null)
 
   return (
     <div className="relative h-screen max-h-screen w-screen overflow-hidden bg-void">
@@ -72,9 +89,21 @@ export default function Game() {
             className="absolute inset-0 h-full max-h-screen w-full object-cover"
           />
 
-          {(currentScene.links ?? []).map((link) => (
-            <ScenePinButton key={link.id} link={link} onNavigate={goToScene} />
-          ))}
+          {showLinks &&
+            (currentScene.links ?? []).map((link) => (
+              <ScenePinButton key={link.id} link={link} onNavigate={goToScene} />
+            ))}
+
+          {canAdvance && (
+            <button
+              type="button"
+              onClick={() => setStoryIndex((prev) => prev + 1)}
+              className="absolute right-8 top-1/2 z-20 flex -translate-y-1/2 items-center gap-2 rounded-full bg-gradient-to-r from-gold to-gold-bright px-5 py-4 font-sans text-body font-[700] text-abyss shadow-lg transition hover:brightness-105"
+            >
+              İlerle
+              <FiArrowRight className="h-5 w-5" />
+            </button>
+          )}
         </div>
       )}
     </div>
