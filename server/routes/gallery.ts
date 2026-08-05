@@ -3,7 +3,7 @@ import multer from 'multer'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname, extname, join } from 'node:path'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import { db } from '../db.ts'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -149,4 +149,63 @@ galleryRouter.post('/', (req, res) => {
 
     res.status(201).json(created)
   })
+})
+
+/** Every place an image URL can be consumed — a used image must not be deleted. */
+function isUrlInUse(url: string): boolean {
+  const hit = db
+    .prepare(
+      `SELECT 1 FROM scenes WHERE image_url = ?
+       UNION ALL
+       SELECT 1 FROM scene_variants WHERE image_url = ?
+       UNION ALL
+       SELECT 1 FROM story_frames WHERE image_url = ?
+       UNION ALL
+       SELECT 1 FROM worlds WHERE scene_image_url = ?
+       LIMIT 1`,
+    )
+    .get(url, url, url, url)
+  return hit !== undefined
+}
+
+/**
+ * Bulk delete. Images still referenced by a scene, option, story frame or world cover
+ * are left untouched and reported back as `skipped` — deleting them would leave
+ * dangling image URLs in the game.
+ */
+galleryRouter.delete('/', (req, res) => {
+  const { ids } = req.body as { ids?: unknown }
+  if (!Array.isArray(ids) || ids.length === 0 || ids.some((id) => typeof id !== 'string')) {
+    res.status(400).json({ error: 'ids must be a non-empty array of image ids' })
+    return
+  }
+
+  const placeholders = ids.map(() => '?').join(',')
+  const rows = db
+    .prepare(`SELECT id, filename, original_name, url FROM images WHERE id IN (${placeholders})`)
+    .all(...(ids as string[])) as Pick<ImageRow, 'id' | 'filename' | 'original_name' | 'url'>[]
+
+  const deletable = rows.filter((row) => !isUrlInUse(row.url))
+  const skipped = rows
+    .filter((row) => isUrlInUse(row.url))
+    .map((row) => ({ id: row.id, originalName: row.original_name }))
+
+  if (deletable.length) {
+    const deletePlaceholders = deletable.map(() => '?').join(',')
+    db.prepare(`DELETE FROM images WHERE id IN (${deletePlaceholders})`).run(...deletable.map((row) => row.id))
+  }
+
+  // The same upload can back several image records (another world, the global library),
+  // so a file only goes once nothing points at it anymore.
+  const stillReferenced = db.prepare('SELECT 1 FROM images WHERE filename = ? LIMIT 1')
+  for (const row of deletable) {
+    if (stillReferenced.get(row.filename)) continue
+    try {
+      rmSync(join(uploadsDir, row.filename))
+    } catch {
+      // file already gone — the database record is what matters
+    }
+  }
+
+  res.json({ deleted: deletable.map((row) => row.id), skipped })
 })
