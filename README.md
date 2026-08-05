@@ -91,6 +91,17 @@ Sırayla şunları yap ve her adımı doğrula:
    O satırı "güncelleme için /graphify . --update kullan" ile değiştir ve
    çıplak `graphify update .` komutunun kullanılmaması gerektiğini not düş.
 
+3b. CLAUDE.md'ye "her merge sonrası grafı tazele" kuralını ekle:
+   - main'e merge indikten hemen sonra, sorulmadan /graphify . --update çalıştır
+     (feature branch'ten değil, main'den).
+   - --update yalnızca SİLİNEN dosyaların düğümlerini temizler; DEĞİŞEN
+     dosyalar için yeni çıkarım otoriter kabul edilip o dosyalara ait eski
+     düğümler düşürülmeli, yoksa silinmiş fonksiyonlar hayalet düğüm olarak kalır.
+   - Graf meşru şekilde küçüldüğünde to_json overwrite'ı reddeder; küçülmenin
+     sebebi doğrulandıysa force=True ile geçilmeli.
+   - graph.json'da küçülme koruması var ama GRAPH_REPORT.md ve graph.html'de yok;
+     bitirmeden önce üçünün de aynı düğüm sayısını verdiği doğrulanmalı.
+
 4. Kurulumun gerçekten çalıştığını kanıtla: graphify explain "<projede gerçekten
    var olan bir tip/fonksiyon>" ve graphify path "<A>" "<B>" komutlarını çalıştır,
    çıktının güncel koda karşılık geldiğini göster.

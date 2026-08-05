@@ -1,0 +1,9 @@
+# Oyuncu/yönetici tarafından yüklenen oyun içeriği — mimari değil, içerik.
+# Graf bunları düğüm yapınca her merge'de vision subagent harcanır ve
+# "banyo fotoğrafı" gibi düğümler mimari sorulara katkı sağlamaz.
+server/uploads/
+
+# Üretilen çıktılar
+dist/
+graphify-out/
+server/data/
