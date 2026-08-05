@@ -11,6 +11,7 @@ export const tr = {
     music: 'Müzik',
     help: 'Yardım',
     exit: 'Çıkış',
+    kitchen: 'Mutfak',
   },
   world: {
     prefix: 'New Life',

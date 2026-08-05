@@ -20,11 +20,11 @@ export default function ProfileCard({ profile }: ProfileCardProps) {
   return (
     <motion.div
       variants={slideFromRight}
-      className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-white/10 bg-black/40 px-4 py-2.5 backdrop-blur-xl"
+      className="pointer-events-auto flex shrink-0 items-center gap-2 rounded-2xl border border-white/10 bg-black/40 px-2.5 py-2 backdrop-blur-xl sm:gap-3 sm:px-4 sm:py-2.5"
     >
       <div className="relative">
         <div
-          className="flex h-10 w-10 items-center justify-center rounded-full text-caption font-[700] text-abyss"
+          className="flex h-9 w-9 items-center justify-center rounded-full text-caption font-[700] text-abyss sm:h-10 sm:w-10"
           style={{
             background: `conic-gradient(from 140deg, #e8c766, #c9a227, #8fb4c9, #e8c766)`,
           }}
@@ -36,7 +36,7 @@ export default function ProfileCard({ profile }: ProfileCardProps) {
         )}
       </div>
 
-      <div className="flex flex-col gap-1">
+      <div className="hidden flex-col gap-1 sm:flex">
         <div className="flex items-baseline gap-2">
           <span className="font-sans text-body font-[700] text-white/90">{profile.displayName}</span>
           <span className="font-mono text-micro text-gold-bright">
@@ -51,7 +51,7 @@ export default function ProfileCard({ profile }: ProfileCardProps) {
       <button
         type="button"
         aria-label={t.profile.notifications}
-        className="relative ml-2 flex h-8 w-8 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white"
+        className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white/70 transition hover:bg-white/10 hover:text-white sm:ml-2"
       >
         <FiBell className="h-4 w-4" />
         {profile.unreadNotifications > 0 && (

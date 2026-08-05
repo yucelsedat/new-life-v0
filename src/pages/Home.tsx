@@ -2,8 +2,7 @@ import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import WorldCard from '../components/WorldCard'
-import FloatingMenu from '../components/FloatingMenu'
-import TopBar from '../components/TopBar'
+import Navbar from '../components/Navbar'
 import StatusBar from '../components/StatusBar'
 import LoadingTransition from '../components/LoadingTransition'
 import { useWorlds } from '../hooks/useWorlds'
@@ -33,7 +32,7 @@ export default function Home() {
 
   return (
     <div className="relative h-screen w-screen overflow-hidden bg-void">
-      <div className="h-full overflow-y-auto px-6 pt-24 pb-28 sm:pl-32 sm:pr-10 sm:pt-36 lg:px-32">
+      <div className="scrollbar-none h-full overflow-y-auto px-6 pb-28 pt-28 md:px-10 md:pt-32 lg:px-16 xl:px-24">
         <motion.div
           initial="hidden"
           animate="visible"
@@ -52,11 +51,7 @@ export default function Home() {
         variants={staggerContainer}
         className="pointer-events-none absolute inset-0 z-10"
       >
-        <TopBar profile={profile} />
-
-        <div className="pointer-events-none fixed inset-x-4 bottom-4 z-20 flex justify-center sm:inset-x-auto sm:bottom-auto sm:left-6 sm:top-1/2 sm:-translate-y-1/2 sm:justify-start">
-          <FloatingMenu />
-        </div>
+        <Navbar profile={profile} />
 
         <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 hidden justify-center sm:flex">
           <StatusBar fps={fps} status={status} />
