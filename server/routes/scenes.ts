@@ -48,6 +48,39 @@ function loadVariants(sceneId: string) {
   return rows.map(toSceneVariant)
 }
 
+interface StoryFrameRow {
+  id: string
+  scene_id: string
+  variant_id: string | null
+  image_url: string
+  position: number
+  created_at: string
+}
+
+function toStoryFrame(row: StoryFrameRow) {
+  return {
+    id: row.id,
+    sceneId: row.scene_id,
+    variantId: row.variant_id,
+    imageUrl: row.image_url,
+    position: row.position,
+  }
+}
+
+/** Every story of a scene, keyed by option: 'base' for the scene image, else the variant id. */
+function loadStories(sceneId: string): Record<string, ReturnType<typeof toStoryFrame>[]> {
+  const rows = db
+    .prepare('SELECT * FROM story_frames WHERE scene_id = ? ORDER BY position ASC')
+    .all(sceneId) as StoryFrameRow[]
+
+  const stories: Record<string, ReturnType<typeof toStoryFrame>[]> = {}
+  for (const row of rows) {
+    const key = row.variant_id ?? 'base'
+    ;(stories[key] ??= []).push(toStoryFrame(row))
+  }
+  return stories
+}
+
 function toScene(row: SceneRow) {
   return {
     id: row.id,
@@ -128,7 +161,53 @@ scenesRouter.get('/:id', (req, res) => {
     return { ...toSceneLink(linkRow), toSceneName: targetScene?.name ?? null }
   })
 
-  res.json({ ...toScene(row), links, variants: loadVariants(row.id) })
+  res.json({ ...toScene(row), links, variants: loadVariants(row.id), stories: loadStories(row.id) })
+})
+
+/**
+ * Replace the story for one option of a scene. `variantId` omitted (or 'base')
+ * targets the scene's own image; otherwise it must be a variant of this scene.
+ * An empty imageUrls array clears the story.
+ */
+scenesRouter.put('/:id/story', (req, res) => {
+  const { variantId, imageUrls } = req.body as { variantId?: string | null; imageUrls?: string[] }
+
+  const scene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
+  if (!scene) {
+    res.status(404).json({ error: 'Scene not found' })
+    return
+  }
+  if (!Array.isArray(imageUrls)) {
+    res.status(400).json({ error: 'imageUrls must be an array' })
+    return
+  }
+
+  const targetVariant = !variantId || variantId === 'base' ? null : variantId
+  if (targetVariant) {
+    const variant = db
+      .prepare('SELECT id FROM scene_variants WHERE id = ? AND scene_id = ?')
+      .get(targetVariant, req.params.id)
+    if (!variant) {
+      res.status(404).json({ error: 'Variant not found on this scene' })
+      return
+    }
+  }
+
+  if (targetVariant) {
+    db.prepare('DELETE FROM story_frames WHERE scene_id = ? AND variant_id = ?').run(req.params.id, targetVariant)
+  } else {
+    db.prepare('DELETE FROM story_frames WHERE scene_id = ? AND variant_id IS NULL').run(req.params.id)
+  }
+
+  const now = new Date().toISOString()
+  const insert = db.prepare(
+    'INSERT INTO story_frames (id, scene_id, variant_id, image_url, position, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+  )
+  imageUrls.forEach((url, index) => {
+    insert.run(randomUUID(), req.params.id, targetVariant, url, index, now)
+  })
+
+  res.json({ variantId: targetVariant ?? 'base', frames: loadStories(req.params.id)[targetVariant ?? 'base'] ?? [] })
 })
 
 scenesRouter.post('/:id/variants', (req, res) => {
@@ -210,6 +289,46 @@ scenesRouter.post('/', (req, res) => {
 
   const row = db.prepare('SELECT * FROM scenes WHERE id = ?').get(id) as SceneRow
   res.status(201).json(toScene(row))
+})
+
+/** Swap the image behind a scene. The old image becomes unused and reappears in pickers. */
+scenesRouter.patch('/:id/image', (req, res) => {
+  const { imageUrl } = req.body as { imageUrl?: string }
+  if (!imageUrl) {
+    res.status(400).json({ error: 'imageUrl is required' })
+    return
+  }
+
+  const scene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
+  if (!scene) {
+    res.status(404).json({ error: 'Scene not found' })
+    return
+  }
+
+  db.prepare('UPDATE scenes SET image_url = ? WHERE id = ?').run(imageUrl, req.params.id)
+  const row = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow
+  res.json(toScene(row))
+})
+
+/** Same swap, but for one of the scene's options. */
+scenesRouter.patch('/:id/variants/:variantId/image', (req, res) => {
+  const { imageUrl } = req.body as { imageUrl?: string }
+  if (!imageUrl) {
+    res.status(400).json({ error: 'imageUrl is required' })
+    return
+  }
+
+  const variant = db
+    .prepare('SELECT * FROM scene_variants WHERE id = ? AND scene_id = ?')
+    .get(req.params.variantId, req.params.id) as SceneVariantRow | undefined
+  if (!variant) {
+    res.status(404).json({ error: 'Variant not found on this scene' })
+    return
+  }
+
+  db.prepare('UPDATE scene_variants SET image_url = ? WHERE id = ?').run(imageUrl, req.params.variantId)
+  const row = db.prepare('SELECT * FROM scene_variants WHERE id = ?').get(req.params.variantId) as SceneVariantRow
+  res.json(toSceneVariant(row))
 })
 
 scenesRouter.patch('/:id/position', (req, res) => {

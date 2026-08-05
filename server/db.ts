@@ -66,6 +66,17 @@ db.exec(`
     image_url TEXT NOT NULL,
     created_at TEXT NOT NULL
   );
+
+  -- An ordered image sequence attached to one option of a scene.
+  -- variant_id NULL means the story belongs to the scene's base image.
+  CREATE TABLE IF NOT EXISTS story_frames (
+    id TEXT PRIMARY KEY,
+    scene_id TEXT NOT NULL,
+    variant_id TEXT,
+    image_url TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+  );
 `)
 
 for (const column of ['canvas_x', 'canvas_y']) {

@@ -8,6 +8,7 @@ export interface DeletionSummary {
   scenes: number
   links: number
   variants: number
+  storyFrames: number
   images: number
 }
 
@@ -66,6 +67,7 @@ export default function DeleteWorldModal({ worldId, onClose, onDeleted }: Delete
         [summary.scenes, t.admin.deleteWorld.scenes],
         [summary.links, t.admin.deleteWorld.links],
         [summary.variants, t.admin.deleteWorld.variants],
+        [summary.storyFrames, t.admin.deleteWorld.storyFrames],
         [summary.images, t.admin.deleteWorld.images],
       ] as const).filter(([count]) => count > 0)
     : []
