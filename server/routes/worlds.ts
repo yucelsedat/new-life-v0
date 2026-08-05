@@ -1,6 +1,9 @@
 import { Router } from 'express'
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
+import { rmSync } from 'node:fs'
 import { db } from '../db.ts'
+import { uploadsDir } from './gallery.ts'
 
 export const worldsRouter = Router()
 
@@ -73,6 +76,109 @@ worldsRouter.post('/', (req, res) => {
 
   const row = db.prepare('SELECT * FROM worlds WHERE id = ?').get(id) as WorldRow
   res.status(201).json(toWorld(row))
+})
+
+worldsRouter.patch('/:id', (req, res) => {
+  const { name, sceneId, sceneLabel } = req.body as {
+    name?: string
+    sceneId?: string
+    sceneLabel?: string
+  }
+
+  const existing = db.prepare('SELECT * FROM worlds WHERE id = ?').get(req.params.id) as WorldRow | undefined
+  if (!existing) {
+    res.status(404).json({ error: 'World not found' })
+    return
+  }
+
+  if (name !== undefined && !name.trim()) {
+    res.status(400).json({ error: 'name cannot be empty' })
+    return
+  }
+
+  db.prepare('UPDATE worlds SET name = ?, scene_id = ?, scene_label = ? WHERE id = ?').run(
+    name?.trim() ?? existing.name,
+    sceneId ?? existing.scene_id,
+    sceneLabel ?? existing.scene_label,
+    req.params.id,
+  )
+
+  const row = db.prepare('SELECT * FROM worlds WHERE id = ?').get(req.params.id) as WorldRow
+  res.json(toWorld(row))
+})
+
+/** What a delete would take with it — shown in the confirmation dialog. */
+worldsRouter.get('/:id/deletion-summary', (req, res) => {
+  const world = db.prepare('SELECT * FROM worlds WHERE id = ?').get(req.params.id) as WorldRow | undefined
+  if (!world) {
+    res.status(404).json({ error: 'World not found' })
+    return
+  }
+
+  const sceneIds = (
+    db.prepare('SELECT id FROM scenes WHERE world_id = ?').all(req.params.id) as { id: string }[]
+  ).map((row) => row.id)
+
+  const placeholders = sceneIds.map(() => '?').join(',')
+  const linkCount = sceneIds.length
+    ? (db
+        .prepare(`SELECT COUNT(*) c FROM scene_links WHERE from_scene_id IN (${placeholders})`)
+        .get(...sceneIds) as { c: number }).c
+    : 0
+  const variantCount = sceneIds.length
+    ? (db
+        .prepare(`SELECT COUNT(*) c FROM scene_variants WHERE scene_id IN (${placeholders})`)
+        .get(...sceneIds) as { c: number }).c
+    : 0
+  const imageCount = (
+    db.prepare('SELECT COUNT(*) c FROM images WHERE world_id = ?').get(req.params.id) as { c: number }
+  ).c
+
+  res.json({
+    worldName: world.name,
+    scenes: sceneIds.length,
+    links: linkCount,
+    variants: variantCount,
+    images: imageCount,
+  })
+})
+
+worldsRouter.delete('/:id', (req, res) => {
+  const world = db.prepare('SELECT * FROM worlds WHERE id = ?').get(req.params.id) as WorldRow | undefined
+  if (!world) {
+    res.status(404).json({ error: 'World not found' })
+    return
+  }
+
+  const sceneIds = (
+    db.prepare('SELECT id FROM scenes WHERE world_id = ?').all(req.params.id) as { id: string }[]
+  ).map((row) => row.id)
+
+  // Only images scoped to this world are removed; the global character library is never touched.
+  const worldImages = db
+    .prepare('SELECT filename FROM images WHERE world_id = ?')
+    .all(req.params.id) as { filename: string }[]
+
+  if (sceneIds.length) {
+    const placeholders = sceneIds.map(() => '?').join(',')
+    db.prepare(`DELETE FROM scene_variants WHERE scene_id IN (${placeholders})`).run(...sceneIds)
+    db.prepare(
+      `DELETE FROM scene_links WHERE from_scene_id IN (${placeholders}) OR to_scene_id IN (${placeholders})`,
+    ).run(...sceneIds, ...sceneIds)
+  }
+  db.prepare('DELETE FROM scenes WHERE world_id = ?').run(req.params.id)
+  db.prepare('DELETE FROM images WHERE world_id = ?').run(req.params.id)
+  db.prepare('DELETE FROM worlds WHERE id = ?').run(req.params.id)
+
+  for (const image of worldImages) {
+    try {
+      rmSync(join(uploadsDir, image.filename))
+    } catch {
+      // file already gone — the database record is what matters
+    }
+  }
+
+  res.status(204).end()
 })
 
 worldsRouter.patch('/:id/progress', (req, res) => {
