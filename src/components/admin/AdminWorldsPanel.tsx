@@ -1,11 +1,12 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { FiEdit3, FiImage } from 'react-icons/fi'
+import { FiCheck, FiEdit2, FiEdit3, FiImage, FiTrash2, FiX } from 'react-icons/fi'
 import type { SceneId, World } from '../../types/world'
 import { useWorlds } from '../../hooks/useWorlds'
 import { useT } from '../../i18n'
 import { SCENE_IDS, SCENE_PALETTES } from '../../utils/constants'
 import { formatPlayTime, formatProgress, formatRelativeDate } from '../../utils/helpers'
+import DeleteWorldModal from './DeleteWorldModal'
 
 async function createWorld(name: string, sceneId: SceneId, sceneLabel: string): Promise<World> {
   const response = await fetch('/api/worlds', {
@@ -17,6 +18,20 @@ async function createWorld(name: string, sceneId: SceneId, sceneLabel: string): 
   return (await response.json()) as World
 }
 
+const ACTION_BUTTON =
+  'flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 text-white/70 transition hover:border-gold-bright hover:text-gold-bright'
+const DANGER_BUTTON =
+  'flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 text-white/70 transition hover:border-[#e0798f] hover:text-[#e0798f]'
+
+async function updateWorld(id: string, name: string, sceneId: SceneId, sceneLabel: string): Promise<void> {
+  const response = await fetch(`/api/worlds/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, sceneId, sceneLabel }),
+  })
+  if (!response.ok) throw new Error(`Request failed: ${response.status}`)
+}
+
 export default function AdminWorldsPanel() {
   const t = useT()
   const { worlds, isLoading, isFallback, refetch } = useWorlds()
@@ -25,6 +40,40 @@ export default function AdminWorldsPanel() {
   const [sceneId, setSceneId] = useState<SceneId>('salon')
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [draftName, setDraftName] = useState('')
+  const [draftSceneId, setDraftSceneId] = useState<SceneId>('salon')
+  const [isSavingRow, setIsSavingRow] = useState(false)
+  const [rowError, setRowError] = useState<string | null>(null)
+  const [deletingWorldId, setDeletingWorldId] = useState<string | null>(null)
+
+  function startEditing(world: World) {
+    setEditingId(world.id)
+    setDraftName(world.name)
+    setDraftSceneId(world.sceneId)
+    setRowError(null)
+  }
+
+  function cancelEditing() {
+    setEditingId(null)
+    setRowError(null)
+  }
+
+  async function saveEditing() {
+    if (!editingId || !draftName.trim()) return
+    setIsSavingRow(true)
+    setRowError(null)
+    try {
+      await updateWorld(editingId, draftName.trim(), draftSceneId, t.scenes[draftSceneId])
+      setEditingId(null)
+      await refetch()
+    } catch {
+      setRowError(t.admin.worlds.updateError)
+    } finally {
+      setIsSavingRow(false)
+    }
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
@@ -117,18 +166,57 @@ export default function AdminWorldsPanel() {
                 </tr>
               </thead>
               <tbody>
-                {worlds.map((world) => (
+                {worlds.map((world) => {
+                  const isEditing = editingId === world.id
+                  return (
                   <tr key={world.id} className="border-b border-white/5">
                     <td className="py-3 pr-4 font-mono text-micro text-white/50">#{world.slot}</td>
-                    <td className="py-3 pr-4 font-sans text-body text-white/90">{world.name}</td>
-                    <td className="py-3 pr-4">
-                      <span className="flex items-center gap-2 font-sans text-caption text-white/70">
-                        <span
-                          className="h-2.5 w-2.5 rounded-full"
-                          style={{ background: SCENE_PALETTES[world.sceneId].accent }}
+                    <td className="py-3 pr-4 font-sans text-body text-white/90 whitespace-nowrap">
+                      {isEditing ? (
+                        <input
+                          autoFocus
+                          value={draftName}
+                          onChange={(event) => setDraftName(event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter') saveEditing()
+                            if (event.key === 'Escape') cancelEditing()
+                          }}
+                          className="w-full min-w-[10rem] rounded-lg border border-white/15 bg-white/5 px-3 py-1.5 font-sans text-body text-white/90 outline-none transition focus:border-gold-bright"
                         />
-                        {world.sceneLabel}
-                      </span>
+                      ) : (
+                        world.name
+                      )}
+                    </td>
+                    <td className="py-3 pr-4">
+                      {isEditing ? (
+                        <div className="flex flex-wrap gap-1">
+                          {SCENE_IDS.map((id) => (
+                            <button
+                              key={id}
+                              type="button"
+                              title={t.scenes[id]}
+                              aria-label={t.scenes[id]}
+                              onClick={() => setDraftSceneId(id)}
+                              className={`flex h-7 w-7 items-center justify-center rounded-lg border transition ${
+                                draftSceneId === id ? 'border-gold-bright bg-white/10' : 'border-white/10 hover:border-white/25'
+                              }`}
+                            >
+                              <span
+                                className="h-2.5 w-2.5 rounded-full"
+                                style={{ background: SCENE_PALETTES[id].accent }}
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="flex items-center gap-2 font-sans text-caption text-white/70">
+                          <span
+                            className="h-2.5 w-2.5 rounded-full"
+                            style={{ background: SCENE_PALETTES[world.sceneId].accent }}
+                          />
+                          {world.sceneLabel}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 pr-4">
                       <div className="flex items-center gap-2">
@@ -145,30 +233,80 @@ export default function AdminWorldsPanel() {
                       {formatRelativeDate(world.lastPlayedAt)} · {formatPlayTime(world.playTimeMinutes)}
                     </td>
                     <td className="py-3 pr-4">
-                      <div className="flex items-center gap-2">
-                        <Link
-                          to={`/admin/worlds/${world.id}/assets`}
-                          className="flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1.5 font-sans text-micro font-[700] text-white/70 transition hover:border-gold-bright hover:text-gold-bright"
-                        >
-                          <FiImage className="h-3 w-3" />
-                          {t.admin.assets.button}
-                        </Link>
-                        <Link
-                          to={`/admin/worlds/${world.id}`}
-                          className="flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1.5 font-sans text-micro font-[700] text-white/70 transition hover:border-gold-bright hover:text-gold-bright"
-                        >
-                          <FiEdit3 className="h-3 w-3" />
-                          {t.admin.worlds.editButton}
-                        </Link>
-                      </div>
+                      {isEditing ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={saveEditing}
+                            disabled={isSavingRow || !draftName.trim()}
+                            className="flex items-center gap-1.5 rounded-full bg-gradient-to-r from-gold to-gold-bright px-3 py-1.5 font-sans text-micro font-[700] text-abyss transition disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <FiCheck className="h-3 w-3" />
+                            {isSavingRow ? t.admin.worlds.saving : t.admin.worlds.saveButton}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={cancelEditing}
+                            className="flex items-center gap-1.5 rounded-full border border-white/15 px-3 py-1.5 font-sans text-micro font-[700] text-white/70 transition hover:border-white/30"
+                          >
+                            <FiX className="h-3 w-3" />
+                            {t.admin.worlds.cancelButton}
+                          </button>
+                          {rowError && <span className="font-sans text-micro text-[#e0798f]">{rowError}</span>}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => startEditing(world)}
+                            title={t.admin.worlds.renameButton}
+                            aria-label={t.admin.worlds.renameButton}
+                            className={ACTION_BUTTON}
+                          >
+                            <FiEdit2 className="h-3.5 w-3.5" />
+                          </button>
+                          <Link
+                            to={`/admin/worlds/${world.id}/assets`}
+                            title={t.admin.assets.button}
+                            aria-label={t.admin.assets.button}
+                            className={ACTION_BUTTON}
+                          >
+                            <FiImage className="h-3.5 w-3.5" />
+                          </Link>
+                          <Link
+                            to={`/admin/worlds/${world.id}`}
+                            title={t.admin.worlds.editButton}
+                            aria-label={t.admin.worlds.editButton}
+                            className={ACTION_BUTTON}
+                          >
+                            <FiEdit3 className="h-3.5 w-3.5" />
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => setDeletingWorldId(world.id)}
+                            title={t.admin.worlds.deleteButton}
+                            aria-label={t.admin.worlds.deleteButton}
+                            className={DANGER_BUTTON}
+                          >
+                            <FiTrash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      <DeleteWorldModal
+        worldId={deletingWorldId}
+        onClose={() => setDeletingWorldId(null)}
+        onDeleted={refetch}
+      />
     </div>
   )
 }
