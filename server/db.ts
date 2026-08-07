@@ -108,6 +108,21 @@ db.exec(`
 
   CREATE UNIQUE INDEX IF NOT EXISTS scene_link_angles_slot
     ON scene_link_angles (link_id, IFNULL(variant_id, ''), angle_offset);
+
+  -- Free-form notes kept alongside a world, worked through like a todo list.
+  -- position is the manual ordering the author gives them; done marks a note as handled.
+  CREATE TABLE IF NOT EXISTS world_notes (
+    id TEXT PRIMARY KEY,
+    world_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL DEFAULT '',
+    done INTEGER NOT NULL DEFAULT 0,
+    position INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS world_notes_by_world ON world_notes (world_id, position);
 `)
 
 // Stories gained an angle: a story now hangs off one angle of one option, not the

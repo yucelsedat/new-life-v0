@@ -169,6 +169,9 @@ worldsRouter.get('/:id/deletion-summary', (req, res) => {
   const imageCount = (
     db.prepare('SELECT COUNT(*) c FROM images WHERE world_id = ?').get(req.params.id) as { c: number }
   ).c
+  const noteCount = (
+    db.prepare('SELECT COUNT(*) c FROM world_notes WHERE world_id = ?').get(req.params.id) as { c: number }
+  ).c
 
   res.json({
     worldName: world.name,
@@ -178,6 +181,7 @@ worldsRouter.get('/:id/deletion-summary', (req, res) => {
     angles: angleCount,
     storyFrames: storyFrameCount,
     images: imageCount,
+    notes: noteCount,
   })
 })
 
@@ -212,6 +216,7 @@ worldsRouter.delete('/:id', (req, res) => {
   }
   db.prepare('DELETE FROM scenes WHERE world_id = ?').run(req.params.id)
   db.prepare('DELETE FROM images WHERE world_id = ?').run(req.params.id)
+  db.prepare('DELETE FROM world_notes WHERE world_id = ?').run(req.params.id)
   db.prepare('DELETE FROM worlds WHERE id = ?').run(req.params.id)
 
   // Delete a file only once no image record anywhere still points at it — the same

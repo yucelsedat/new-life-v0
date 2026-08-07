@@ -6,6 +6,7 @@ import { profileRouter } from './routes/profile.ts'
 import { statusRouter } from './routes/status.ts'
 import { galleryRouter, uploadsDir } from './routes/gallery.ts'
 import { scenesRouter, sceneLinksRouter } from './routes/scenes.ts'
+import { notesRouter } from './routes/notes.ts'
 
 const app = express()
 const PORT = process.env.PORT ?? 8787
@@ -19,6 +20,7 @@ app.use('/api/profile', profileRouter)
 app.use('/api/gallery', galleryRouter)
 app.use('/api/scenes', scenesRouter)
 app.use('/api/scene-links', sceneLinksRouter)
+app.use('/api/notes', notesRouter)
 app.use('/api', statusRouter)
 
 app.listen(PORT, () => {

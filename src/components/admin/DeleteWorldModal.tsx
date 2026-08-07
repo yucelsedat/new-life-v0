@@ -11,6 +11,7 @@ export interface DeletionSummary {
   angles: number
   storyFrames: number
   images: number
+  notes: number
 }
 
 interface DeleteWorldModalProps {
@@ -71,6 +72,7 @@ export default function DeleteWorldModal({ worldId, onClose, onDeleted }: Delete
         [summary.angles, t.admin.deleteWorld.angles],
         [summary.storyFrames, t.admin.deleteWorld.storyFrames],
         [summary.images, t.admin.deleteWorld.images],
+        [summary.notes, t.admin.deleteWorld.notes],
       ] as const).filter(([count]) => count > 0)
     : []
 

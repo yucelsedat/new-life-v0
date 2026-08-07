@@ -124,6 +124,18 @@ export interface WorldSceneGraph {
   links: SceneLink[]
 }
 
+/** A todo-style note kept against a world. `position` is the author's manual ordering. */
+export interface WorldNote {
+  id: string
+  worldId: string
+  title: string
+  body: string
+  done: boolean
+  position: number
+  createdAt: string
+  updatedAt: string
+}
+
 export type QualityTier = 'hero' | 'satellite' | 'lite'
 
 export type LayoutBreakpoint = 'desktop' | 'tablet' | 'mobile'
