@@ -48,10 +48,73 @@ function loadVariants(sceneId: string) {
   return rows.map(toSceneVariant)
 }
 
+/** An option is either the scene's own image ('base') or one of its variants. */
+function optionKey(variantId: string | null): string {
+  return variantId ?? 'base'
+}
+
+/** The inverse: 'base' (or nothing at all) means the scene's own image. */
+function toVariantId(option: string | null | undefined): string | null {
+  return !option || option === 'base' ? null : option
+}
+
+/** Addresses one angle of one option — the unit a story or a link placement hangs off. */
+function viewKey(variantId: string | null, angleOffset: number): string {
+  return `${optionKey(variantId)}#${angleOffset}`
+}
+
+function parseAngleOffset(value: unknown): number | null {
+  if (value === undefined || value === null) return 0
+  const offset = typeof value === 'number' ? value : Number(value)
+  return Number.isInteger(offset) ? offset : null
+}
+
+interface SceneAngleRow {
+  id: string
+  scene_id: string
+  variant_id: string | null
+  angle_offset: number
+  image_url: string
+  created_at: string
+}
+
+function toSceneAngle(row: SceneAngleRow) {
+  return {
+    id: row.id,
+    sceneId: row.scene_id,
+    variantId: row.variant_id,
+    offset: row.angle_offset,
+    imageUrl: row.image_url,
+    createdAt: row.created_at,
+  }
+}
+
+/** Every angle of a scene, keyed by option. Offset 0 is the option image and is never listed. */
+function loadAngles(sceneId: string): Record<string, ReturnType<typeof toSceneAngle>[]> {
+  const rows = db
+    .prepare('SELECT * FROM scene_angles WHERE scene_id = ? ORDER BY angle_offset ASC')
+    .all(sceneId) as SceneAngleRow[]
+
+  const angles: Record<string, ReturnType<typeof toSceneAngle>[]> = {}
+  for (const row of rows) {
+    ;(angles[optionKey(row.variant_id)] ??= []).push(toSceneAngle(row))
+  }
+  return angles
+}
+
+function findAngle(sceneId: string, variantId: string | null, angleOffset: number) {
+  const variantClause = variantId === null ? 'variant_id IS NULL' : 'variant_id = ?'
+  const variantParams = variantId === null ? [] : [variantId]
+  return db
+    .prepare(`SELECT * FROM scene_angles WHERE scene_id = ? AND ${variantClause} AND angle_offset = ?`)
+    .get(sceneId, ...variantParams, angleOffset) as SceneAngleRow | undefined
+}
+
 interface StoryFrameRow {
   id: string
   scene_id: string
   variant_id: string | null
+  angle_offset: number
   image_url: string
   position: number
   created_at: string
@@ -62,12 +125,13 @@ function toStoryFrame(row: StoryFrameRow) {
     id: row.id,
     sceneId: row.scene_id,
     variantId: row.variant_id,
+    angleOffset: row.angle_offset,
     imageUrl: row.image_url,
     position: row.position,
   }
 }
 
-/** Every story of a scene, keyed by option: 'base' for the scene image, else the variant id. */
+/** Every story of a scene, keyed by `<option>#<angle>` — e.g. 'base#0', '<variantId>#-1'. */
 function loadStories(sceneId: string): Record<string, ReturnType<typeof toStoryFrame>[]> {
   const rows = db
     .prepare('SELECT * FROM story_frames WHERE scene_id = ? ORDER BY position ASC')
@@ -75,10 +139,49 @@ function loadStories(sceneId: string): Record<string, ReturnType<typeof toStoryF
 
   const stories: Record<string, ReturnType<typeof toStoryFrame>[]> = {}
   for (const row of rows) {
-    const key = row.variant_id ?? 'base'
-    ;(stories[key] ??= []).push(toStoryFrame(row))
+    ;(stories[viewKey(row.variant_id, row.angle_offset)] ??= []).push(toStoryFrame(row))
   }
   return stories
+}
+
+interface SceneLinkAngleRow {
+  link_id: string
+  variant_id: string | null
+  angle_offset: number
+  position_x: number
+  position_y: number
+}
+
+/** Per-angle placement overrides for one link, keyed the same way as stories. */
+function loadLinkAnglePositions(linkId: string): Record<string, { positionX: number; positionY: number }> {
+  const rows = db
+    .prepare('SELECT * FROM scene_link_angles WHERE link_id = ?')
+    .all(linkId) as SceneLinkAngleRow[]
+
+  const positions: Record<string, { positionX: number; positionY: number }> = {}
+  for (const row of rows) {
+    positions[viewKey(row.variant_id, row.angle_offset)] = {
+      positionX: row.position_x,
+      positionY: row.position_y,
+    }
+  }
+  return positions
+}
+
+/** Drop everything hanging off one angle of one option: its story and its link placements. */
+function deleteAngleDependents(sceneId: string, variantId: string | null, angleOffset: number) {
+  const variantClause = variantId === null ? 'variant_id IS NULL' : 'variant_id = ?'
+  const variantParams = variantId === null ? [] : [variantId]
+
+  db.prepare(
+    `DELETE FROM story_frames WHERE scene_id = ? AND ${variantClause} AND angle_offset = ?`,
+  ).run(sceneId, ...variantParams, angleOffset)
+
+  db.prepare(`
+    DELETE FROM scene_link_angles
+    WHERE ${variantClause} AND angle_offset = ?
+      AND link_id IN (SELECT id FROM scene_links WHERE from_scene_id = ?)
+  `).run(...variantParams, angleOffset, sceneId)
 }
 
 function toScene(row: SceneRow) {
@@ -158,19 +261,34 @@ scenesRouter.get('/:id', (req, res) => {
     const targetScene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(linkRow.to_scene_id) as
       | SceneRow
       | undefined
-    return { ...toSceneLink(linkRow), toSceneName: targetScene?.name ?? null }
+    return {
+      ...toSceneLink(linkRow),
+      toSceneName: targetScene?.name ?? null,
+      anglePositions: loadLinkAnglePositions(linkRow.id),
+    }
   })
 
-  res.json({ ...toScene(row), links, variants: loadVariants(row.id), stories: loadStories(row.id) })
+  res.json({
+    ...toScene(row),
+    links,
+    variants: loadVariants(row.id),
+    angles: loadAngles(row.id),
+    stories: loadStories(row.id),
+  })
 })
 
 /**
- * Replace the story for one option of a scene. `variantId` omitted (or 'base')
+ * Replace the story for one angle of one option. `variantId` omitted (or 'base')
  * targets the scene's own image; otherwise it must be a variant of this scene.
- * An empty imageUrls array clears the story.
+ * `angleOffset` omitted means the option image itself. An empty imageUrls array
+ * clears the story.
  */
 scenesRouter.put('/:id/story', (req, res) => {
-  const { variantId, imageUrls } = req.body as { variantId?: string | null; imageUrls?: string[] }
+  const { variantId, angleOffset, imageUrls } = req.body as {
+    variantId?: string | null
+    angleOffset?: number
+    imageUrls?: string[]
+  }
 
   const scene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
   if (!scene) {
@@ -182,7 +300,13 @@ scenesRouter.put('/:id/story', (req, res) => {
     return
   }
 
-  const targetVariant = !variantId || variantId === 'base' ? null : variantId
+  const offset = parseAngleOffset(angleOffset)
+  if (offset === null) {
+    res.status(400).json({ error: 'angleOffset must be an integer' })
+    return
+  }
+
+  const targetVariant = toVariantId(variantId)
   if (targetVariant) {
     const variant = db
       .prepare('SELECT id FROM scene_variants WHERE id = ? AND scene_id = ?')
@@ -193,21 +317,28 @@ scenesRouter.put('/:id/story', (req, res) => {
     }
   }
 
-  if (targetVariant) {
-    db.prepare('DELETE FROM story_frames WHERE scene_id = ? AND variant_id = ?').run(req.params.id, targetVariant)
-  } else {
-    db.prepare('DELETE FROM story_frames WHERE scene_id = ? AND variant_id IS NULL').run(req.params.id)
+  if (offset !== 0 && !findAngle(req.params.id, targetVariant, offset)) {
+    res.status(404).json({ error: 'Angle not found on this option' })
+    return
   }
 
+  const variantClause = targetVariant === null ? 'variant_id IS NULL' : 'variant_id = ?'
+  const variantParams = targetVariant === null ? [] : [targetVariant]
+  db.prepare(
+    `DELETE FROM story_frames WHERE scene_id = ? AND ${variantClause} AND angle_offset = ?`,
+  ).run(req.params.id, ...variantParams, offset)
+
   const now = new Date().toISOString()
-  const insert = db.prepare(
-    'INSERT INTO story_frames (id, scene_id, variant_id, image_url, position, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-  )
+  const insert = db.prepare(`
+    INSERT INTO story_frames (id, scene_id, variant_id, angle_offset, image_url, position, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `)
   imageUrls.forEach((url, index) => {
-    insert.run(randomUUID(), req.params.id, targetVariant, url, index, now)
+    insert.run(randomUUID(), req.params.id, targetVariant, offset, url, index, now)
   })
 
-  res.json({ variantId: targetVariant ?? 'base', frames: loadStories(req.params.id)[targetVariant ?? 'base'] ?? [] })
+  const key = viewKey(targetVariant, offset)
+  res.json({ viewKey: key, frames: loadStories(req.params.id)[key] ?? [] })
 })
 
 scenesRouter.post('/:id/variants', (req, res) => {
@@ -258,8 +389,153 @@ scenesRouter.delete('/:id/variants/:variantId', (req, res) => {
     return
   }
 
+  // Angles, stories and link placements only exist relative to this option.
+  db.prepare('DELETE FROM story_frames WHERE scene_id = ? AND variant_id = ?').run(
+    req.params.id,
+    req.params.variantId,
+  )
+  db.prepare('DELETE FROM scene_angles WHERE scene_id = ? AND variant_id = ?').run(
+    req.params.id,
+    req.params.variantId,
+  )
+  db.prepare(`
+    DELETE FROM scene_link_angles
+    WHERE variant_id = ? AND link_id IN (SELECT id FROM scene_links WHERE from_scene_id = ?)
+  `).run(req.params.variantId, req.params.id)
   db.prepare('DELETE FROM scene_variants WHERE id = ?').run(req.params.variantId)
   res.status(204).end()
+})
+
+/**
+ * Add a viewing angle next to the one currently on screen. `direction` decides which
+ * way you turn from `fromOffset`, so angles grow outwards as a chain in each direction:
+ * 0 → +1 → +2 to the right, 0 → -1 → -2 to the left.
+ */
+scenesRouter.post('/:id/angles', (req, res) => {
+  const { variantId, fromOffset, direction, imageUrl } = req.body as {
+    variantId?: string | null
+    fromOffset?: number
+    direction?: string
+    imageUrl?: string
+  }
+
+  if (direction !== 'left' && direction !== 'right') {
+    res.status(400).json({ error: "direction must be 'left' or 'right'" })
+    return
+  }
+  if (!imageUrl) {
+    res.status(400).json({ error: 'imageUrl is required' })
+    return
+  }
+
+  const scene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
+  if (!scene) {
+    res.status(404).json({ error: 'Scene not found' })
+    return
+  }
+
+  const from = parseAngleOffset(fromOffset)
+  if (from === null) {
+    res.status(400).json({ error: 'fromOffset must be an integer' })
+    return
+  }
+
+  const targetVariant = toVariantId(variantId)
+  let optionImageUrl = scene.image_url
+  if (targetVariant) {
+    const variant = db
+      .prepare('SELECT * FROM scene_variants WHERE id = ? AND scene_id = ?')
+      .get(targetVariant, req.params.id) as SceneVariantRow | undefined
+    if (!variant) {
+      res.status(404).json({ error: 'Variant not found on this scene' })
+      return
+    }
+    optionImageUrl = variant.image_url
+  }
+
+  if (from !== 0 && !findAngle(req.params.id, targetVariant, from)) {
+    res.status(404).json({ error: 'Angle not found on this option' })
+    return
+  }
+
+  const offset = from + (direction === 'right' ? 1 : -1)
+  if (findAngle(req.params.id, targetVariant, offset)) {
+    res.status(409).json({ error: 'This option already has an angle in that direction' })
+    return
+  }
+
+  if (imageUrl === optionImageUrl) {
+    res.status(409).json({ error: 'Image is already the image of this option' })
+    return
+  }
+  const variantClause = targetVariant === null ? 'variant_id IS NULL' : 'variant_id = ?'
+  const variantParams = targetVariant === null ? [] : [targetVariant]
+  const duplicate = db
+    .prepare(`SELECT id FROM scene_angles WHERE scene_id = ? AND ${variantClause} AND image_url = ?`)
+    .get(req.params.id, ...variantParams, imageUrl)
+  if (duplicate) {
+    res.status(409).json({ error: 'Image is already an angle of this option' })
+    return
+  }
+
+  const id = randomUUID()
+  db.prepare(`
+    INSERT INTO scene_angles (id, scene_id, variant_id, angle_offset, image_url, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(id, req.params.id, targetVariant, offset, imageUrl, new Date().toISOString())
+
+  const row = db.prepare('SELECT * FROM scene_angles WHERE id = ?').get(id) as SceneAngleRow
+  res.status(201).json(toSceneAngle(row))
+})
+
+/** Swap the image behind one angle. */
+scenesRouter.patch('/:id/angles/:angleId/image', (req, res) => {
+  const { imageUrl } = req.body as { imageUrl?: string }
+  if (!imageUrl) {
+    res.status(400).json({ error: 'imageUrl is required' })
+    return
+  }
+
+  const angle = db
+    .prepare('SELECT * FROM scene_angles WHERE id = ? AND scene_id = ?')
+    .get(req.params.angleId, req.params.id) as SceneAngleRow | undefined
+  if (!angle) {
+    res.status(404).json({ error: 'Angle not found on this scene' })
+    return
+  }
+
+  db.prepare('UPDATE scene_angles SET image_url = ? WHERE id = ?').run(imageUrl, req.params.angleId)
+  const row = db.prepare('SELECT * FROM scene_angles WHERE id = ?').get(req.params.angleId) as SceneAngleRow
+  res.json(toSceneAngle(row))
+})
+
+/**
+ * Remove an angle. Everything further out on the same side goes with it — those angles
+ * were only reachable by turning through this one.
+ */
+scenesRouter.delete('/:id/angles/:angleId', (req, res) => {
+  const angle = db
+    .prepare('SELECT * FROM scene_angles WHERE id = ? AND scene_id = ?')
+    .get(req.params.angleId, req.params.id) as SceneAngleRow | undefined
+  if (!angle) {
+    res.status(404).json({ error: 'Angle not found on this scene' })
+    return
+  }
+
+  const variantClause = angle.variant_id === null ? 'variant_id IS NULL' : 'variant_id = ?'
+  const variantParams = angle.variant_id === null ? [] : [angle.variant_id]
+  const comparison = angle.angle_offset > 0 ? 'angle_offset >= ?' : 'angle_offset <= ?'
+
+  const orphaned = db
+    .prepare(`SELECT * FROM scene_angles WHERE scene_id = ? AND ${variantClause} AND ${comparison}`)
+    .all(req.params.id, ...variantParams, angle.angle_offset) as SceneAngleRow[]
+
+  for (const row of orphaned) {
+    deleteAngleDependents(req.params.id, row.variant_id, row.angle_offset)
+    db.prepare('DELETE FROM scene_angles WHERE id = ?').run(row.id)
+  }
+
+  res.json({ removedOffsets: orphaned.map((row) => row.angle_offset) })
 })
 
 scenesRouter.post('/', (req, res) => {
@@ -440,8 +716,18 @@ scenesRouter.post('/:id/connect', (req, res) => {
   })
 })
 
+/**
+ * Move a link's pin. Without `variantId`/`angleOffset` — or on the base option at angle 0
+ * — this moves the link itself, which is where every view falls back to. On any other
+ * angle it records a placement override for just that view.
+ */
 sceneLinksRouter.patch('/:id', (req, res) => {
-  const { positionX, positionY } = req.body as { positionX?: number; positionY?: number }
+  const { positionX, positionY, variantId, angleOffset } = req.body as {
+    positionX?: number
+    positionY?: number
+    variantId?: string | null
+    angleOffset?: number
+  }
   const existing = db.prepare('SELECT * FROM scene_links WHERE id = ?').get(req.params.id) as
     | SceneLinkRow
     | undefined
@@ -450,15 +736,47 @@ sceneLinksRouter.patch('/:id', (req, res) => {
     return
   }
 
-  const nextX = positionX ?? existing.position_x
-  const nextY = positionY ?? existing.position_y
+  const offset = parseAngleOffset(angleOffset)
+  if (offset === null) {
+    res.status(400).json({ error: 'angleOffset must be an integer' })
+    return
+  }
+  const targetVariant = toVariantId(variantId)
 
-  db.prepare('UPDATE scene_links SET position_x = ?, position_y = ? WHERE id = ?').run(
-    nextX,
-    nextY,
-    req.params.id,
-  )
+  if (targetVariant === null && offset === 0) {
+    const nextX = positionX ?? existing.position_x
+    const nextY = positionY ?? existing.position_y
+    db.prepare('UPDATE scene_links SET position_x = ?, position_y = ? WHERE id = ?').run(
+      nextX,
+      nextY,
+      req.params.id,
+    )
 
-  const row = db.prepare('SELECT * FROM scene_links WHERE id = ?').get(req.params.id) as SceneLinkRow
-  res.json(toSceneLink(row))
+    const row = db.prepare('SELECT * FROM scene_links WHERE id = ?').get(req.params.id) as SceneLinkRow
+    res.json({ ...toSceneLink(row), anglePositions: loadLinkAnglePositions(req.params.id) })
+    return
+  }
+
+  const variantClause = targetVariant === null ? 'variant_id IS NULL' : 'variant_id = ?'
+  const variantParams = targetVariant === null ? [] : [targetVariant]
+  const current = db
+    .prepare(`SELECT * FROM scene_link_angles WHERE link_id = ? AND ${variantClause} AND angle_offset = ?`)
+    .get(req.params.id, ...variantParams, offset) as SceneLinkAngleRow | undefined
+
+  const nextX = positionX ?? current?.position_x ?? existing.position_x
+  const nextY = positionY ?? current?.position_y ?? existing.position_y
+
+  if (current) {
+    db.prepare(
+      `UPDATE scene_link_angles SET position_x = ?, position_y = ?
+       WHERE link_id = ? AND ${variantClause} AND angle_offset = ?`,
+    ).run(nextX, nextY, req.params.id, ...variantParams, offset)
+  } else {
+    db.prepare(`
+      INSERT INTO scene_link_angles (link_id, variant_id, angle_offset, position_x, position_y)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(req.params.id, targetVariant, offset, nextX, nextY)
+  }
+
+  res.json({ ...toSceneLink(existing), anglePositions: loadLinkAnglePositions(req.params.id) })
 })

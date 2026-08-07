@@ -77,7 +77,46 @@ db.exec(`
     position INTEGER NOT NULL,
     created_at TEXT NOT NULL
   );
+
+  -- A different viewing direction of one option of a scene — still the same scene,
+  -- so it inherits that scene's links. angle_offset is signed and relative to the
+  -- option's own image: 0 is the option image itself (never stored here),
+  -- +1/+2… are successive turns to the right, -1/-2… to the left.
+  CREATE TABLE IF NOT EXISTS scene_angles (
+    id TEXT PRIMARY KEY,
+    scene_id TEXT NOT NULL,
+    variant_id TEXT,
+    angle_offset INTEGER NOT NULL,
+    image_url TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS scene_angles_slot
+    ON scene_angles (scene_id, IFNULL(variant_id, ''), angle_offset);
+
+  -- Per-angle placement of a scene link. A link is drawn on every angle, but the exit
+  -- it marks sits elsewhere in the frame once you turn, so each angle may override the
+  -- link's own position_x/position_y. The base option at angle 0 has no row here — it
+  -- keeps using the link row itself.
+  CREATE TABLE IF NOT EXISTS scene_link_angles (
+    link_id TEXT NOT NULL,
+    variant_id TEXT,
+    angle_offset INTEGER NOT NULL,
+    position_x REAL NOT NULL,
+    position_y REAL NOT NULL
+  );
+
+  CREATE UNIQUE INDEX IF NOT EXISTS scene_link_angles_slot
+    ON scene_link_angles (link_id, IFNULL(variant_id, ''), angle_offset);
 `)
+
+// Stories gained an angle: a story now hangs off one angle of one option, not the
+// whole option. Everything written before angles existed belongs to angle 0.
+try {
+  db.exec(`ALTER TABLE story_frames ADD COLUMN angle_offset INTEGER NOT NULL DEFAULT 0`)
+} catch {
+  // column already exists
+}
 
 for (const column of ['canvas_x', 'canvas_y']) {
   try {

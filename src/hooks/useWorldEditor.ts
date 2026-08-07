@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { SceneLink, SceneVariant, StoryFrame, WorldScene } from '../types/world'
+import { viewKey } from '../types/world'
+import type { AngleDirection, SceneAngle, SceneLink, SceneVariant, StoryFrame, WorldScene } from '../types/world'
 
 export interface UseWorldEditorResult {
   scenes: WorldScene[]
@@ -9,10 +10,28 @@ export interface UseWorldEditorResult {
   createFirstScene: (name: string, imageUrl: string) => Promise<void>
   createLink: (label: string, imageUrl: string, positionX?: number, positionY?: number) => Promise<void>
   createVariant: (imageUrl: string) => Promise<void>
-  saveStory: (variantKey: string, imageUrls: string[]) => Promise<void>
-  changeOptionImage: (variantKey: string, imageUrl: string) => Promise<void>
+  createAngle: (
+    optionKey: string,
+    fromOffset: number,
+    direction: AngleDirection,
+    imageUrl: string,
+  ) => Promise<void>
+  deleteAngle: (optionKey: string, angleId: string) => Promise<void>
+  saveStory: (optionKey: string, angleOffset: number, imageUrls: string[]) => Promise<void>
+  changeViewImage: (optionKey: string, angleOffset: number, imageUrl: string) => Promise<void>
   goToScene: (sceneId: string) => Promise<void>
-  updateLinkPosition: (linkId: string, positionX: number, positionY: number) => void
+  updateLinkPosition: (
+    linkId: string,
+    optionKey: string,
+    angleOffset: number,
+    positionX: number,
+    positionY: number,
+  ) => void
+}
+
+/** The server speaks variant ids and treats null as the scene's own image. */
+function toVariantId(optionKey: string): string | null {
+  return optionKey === 'base' ? null : optionKey
 }
 
 async function fetchScene(sceneId: string): Promise<WorldScene> {
@@ -116,20 +135,78 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     [currentScene],
   )
 
+  /** Turn from the angle on screen and hang a new one off it. */
+  const createAngle = useCallback(
+    async (optionKey: string, fromOffset: number, direction: AngleDirection, imageUrl: string) => {
+      if (!currentScene) return
+      setError(null)
+      try {
+        const response = await fetch(`/api/scenes/${currentScene.id}/angles`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ variantId: toVariantId(optionKey), fromOffset, direction, imageUrl }),
+        })
+        if (!response.ok) throw new Error(`Request failed: ${response.status}`)
+        const angle = (await response.json()) as SceneAngle
+        setCurrentScene((prev) => {
+          if (!prev) return prev
+          const existing = prev.angles?.[optionKey] ?? []
+          const next = [...existing, angle].sort((a, b) => a.offset - b.offset)
+          return { ...prev, angles: { ...(prev.angles ?? {}), [optionKey]: next } }
+        })
+      } catch {
+        setError('create-failed')
+      }
+    },
+    [currentScene],
+  )
+
+  /** Removing an angle also removes everything further out on that side. */
+  const deleteAngle = useCallback(
+    async (optionKey: string, angleId: string) => {
+      if (!currentScene) return
+      setError(null)
+      try {
+        const response = await fetch(`/api/scenes/${currentScene.id}/angles/${angleId}`, { method: 'DELETE' })
+        if (!response.ok) throw new Error(`Request failed: ${response.status}`)
+        const { removedOffsets } = (await response.json()) as { removedOffsets: number[] }
+        const removed = new Set(removedOffsets)
+        setCurrentScene((prev) => {
+          if (!prev) return prev
+          const stories = { ...(prev.stories ?? {}) }
+          for (const offset of removed) delete stories[viewKey(optionKey, offset)]
+          return {
+            ...prev,
+            angles: {
+              ...(prev.angles ?? {}),
+              [optionKey]: (prev.angles?.[optionKey] ?? []).filter((angle) => !removed.has(angle.offset)),
+            },
+            stories,
+          }
+        })
+      } catch {
+        setError('delete-failed')
+      }
+    },
+    [currentScene],
+  )
+
   const saveStory = useCallback(
-    async (variantKey: string, imageUrls: string[]) => {
+    async (optionKey: string, angleOffset: number, imageUrls: string[]) => {
       if (!currentScene) return
       setError(null)
       try {
         const response = await fetch(`/api/scenes/${currentScene.id}/story`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ variantId: variantKey, imageUrls }),
+          body: JSON.stringify({ variantId: toVariantId(optionKey), angleOffset, imageUrls }),
         })
         if (!response.ok) throw new Error(`Request failed: ${response.status}`)
-        const { frames } = (await response.json()) as { variantId: string; frames: StoryFrame[] }
+        const { frames } = (await response.json()) as { viewKey: string; frames: StoryFrame[] }
         setCurrentScene((prev) =>
-          prev ? { ...prev, stories: { ...(prev.stories ?? {}), [variantKey]: frames } } : prev,
+          prev
+            ? { ...prev, stories: { ...(prev.stories ?? {}), [viewKey(optionKey, angleOffset)]: frames } }
+            : prev,
         )
       } catch {
         setError('create-failed')
@@ -138,15 +215,24 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     [currentScene],
   )
 
-  /** Swap the image behind the active option — the scene itself, or one of its variants. */
-  const changeOptionImage = useCallback(
-    async (variantKey: string, imageUrl: string) => {
+  /** Swap the image behind whatever is on screen — an option image, or one of its angles. */
+  const changeViewImage = useCallback(
+    async (optionKey: string, angleOffset: number, imageUrl: string) => {
       if (!currentScene) return
       setError(null)
-      const url =
-        variantKey === 'base'
+
+      const angle =
+        angleOffset === 0
+          ? null
+          : (currentScene.angles?.[optionKey] ?? []).find((item) => item.offset === angleOffset)
+      if (angleOffset !== 0 && !angle) return
+
+      const url = angle
+        ? `/api/scenes/${currentScene.id}/angles/${angle.id}/image`
+        : optionKey === 'base'
           ? `/api/scenes/${currentScene.id}/image`
-          : `/api/scenes/${currentScene.id}/variants/${variantKey}/image`
+          : `/api/scenes/${currentScene.id}/variants/${optionKey}/image`
+
       try {
         const response = await fetch(url, {
           method: 'PATCH',
@@ -156,14 +242,27 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
         if (!response.ok) throw new Error(`Request failed: ${response.status}`)
         setCurrentScene((prev) => {
           if (!prev) return prev
-          if (variantKey === 'base') return { ...prev, imageUrl }
+          if (angle) {
+            return {
+              ...prev,
+              angles: {
+                ...(prev.angles ?? {}),
+                [optionKey]: (prev.angles?.[optionKey] ?? []).map((item) =>
+                  item.id === angle.id ? { ...item, imageUrl } : item,
+                ),
+              },
+            }
+          }
+          if (optionKey === 'base') return { ...prev, imageUrl }
           return {
             ...prev,
-            variants: (prev.variants ?? []).map((v) => (v.id === variantKey ? { ...v, imageUrl } : v)),
+            variants: (prev.variants ?? []).map((v) => (v.id === optionKey ? { ...v, imageUrl } : v)),
           }
         })
         setScenes((prev) =>
-          variantKey === 'base' ? prev.map((s) => (s.id === currentScene.id ? { ...s, imageUrl } : s)) : prev,
+          !angle && optionKey === 'base'
+            ? prev.map((s) => (s.id === currentScene.id ? { ...s, imageUrl } : s))
+            : prev,
         )
       } catch {
         setError('update-failed')
@@ -182,18 +281,45 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     }
   }, [])
 
-  const updateLinkPosition = useCallback((linkId: string, positionX: number, positionY: number) => {
-    setCurrentScene((prev) => {
-      if (!prev || !prev.links) return prev
-      return { ...prev, links: prev.links.map((l) => (l.id === linkId ? { ...l, positionX, positionY } : l)) }
-    })
+  /**
+   * A pin dragged on the base option's own image moves the link everywhere it has no
+   * placement of its own; dragged on any other angle it only moves there.
+   */
+  const updateLinkPosition = useCallback(
+    (linkId: string, optionKey: string, angleOffset: number, positionX: number, positionY: number) => {
+      const isFallbackView = optionKey === 'base' && angleOffset === 0
 
-    fetch(`/api/scene-links/${linkId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ positionX, positionY }),
-    }).catch(() => {})
-  }, [])
+      setCurrentScene((prev) => {
+        if (!prev || !prev.links) return prev
+        return {
+          ...prev,
+          links: prev.links.map((link) => {
+            if (link.id !== linkId) return link
+            if (isFallbackView) return { ...link, positionX, positionY }
+            return {
+              ...link,
+              anglePositions: {
+                ...(link.anglePositions ?? {}),
+                [viewKey(optionKey, angleOffset)]: { positionX, positionY },
+              },
+            }
+          }),
+        }
+      })
+
+      fetch(`/api/scene-links/${linkId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          positionX,
+          positionY,
+          variantId: toVariantId(optionKey),
+          angleOffset,
+        }),
+      }).catch(() => {})
+    },
+    [],
+  )
 
   return {
     scenes,
@@ -203,8 +329,10 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     createFirstScene,
     createLink,
     createVariant,
+    createAngle,
+    deleteAngle,
     saveStory,
-    changeOptionImage,
+    changeViewImage,
     goToScene,
     updateLinkPosition,
   }
