@@ -124,9 +124,11 @@ worldsRouter.get('/:id/used-images', (req, res) => {
        UNION
        SELECT image_url FROM scene_variants WHERE scene_id IN (SELECT id FROM scenes WHERE world_id = ?)
        UNION
+       SELECT image_url FROM scene_angles WHERE scene_id IN (SELECT id FROM scenes WHERE world_id = ?)
+       UNION
        SELECT image_url FROM story_frames WHERE scene_id IN (SELECT id FROM scenes WHERE world_id = ?)`,
     )
-    .all(req.params.id, req.params.id, req.params.id) as { image_url: string }[]
+    .all(req.params.id, req.params.id, req.params.id, req.params.id) as { image_url: string }[]
 
   res.json({ urls: rows.map((row) => row.image_url) })
 })
@@ -154,6 +156,11 @@ worldsRouter.get('/:id/deletion-summary', (req, res) => {
         .prepare(`SELECT COUNT(*) c FROM scene_variants WHERE scene_id IN (${placeholders})`)
         .get(...sceneIds) as { c: number }).c
     : 0
+  const angleCount = sceneIds.length
+    ? (db
+        .prepare(`SELECT COUNT(*) c FROM scene_angles WHERE scene_id IN (${placeholders})`)
+        .get(...sceneIds) as { c: number }).c
+    : 0
   const storyFrameCount = sceneIds.length
     ? (db
         .prepare(`SELECT COUNT(*) c FROM story_frames WHERE scene_id IN (${placeholders})`)
@@ -168,6 +175,7 @@ worldsRouter.get('/:id/deletion-summary', (req, res) => {
     scenes: sceneIds.length,
     links: linkCount,
     variants: variantCount,
+    angles: angleCount,
     storyFrames: storyFrameCount,
     images: imageCount,
   })
@@ -193,6 +201,11 @@ worldsRouter.delete('/:id', (req, res) => {
     const placeholders = sceneIds.map(() => '?').join(',')
     db.prepare(`DELETE FROM story_frames WHERE scene_id IN (${placeholders})`).run(...sceneIds)
     db.prepare(`DELETE FROM scene_variants WHERE scene_id IN (${placeholders})`).run(...sceneIds)
+    db.prepare(`DELETE FROM scene_angles WHERE scene_id IN (${placeholders})`).run(...sceneIds)
+    db.prepare(`
+      DELETE FROM scene_link_angles
+      WHERE link_id IN (SELECT id FROM scene_links WHERE from_scene_id IN (${placeholders}))
+    `).run(...sceneIds)
     db.prepare(
       `DELETE FROM scene_links WHERE from_scene_id IN (${placeholders}) OR to_scene_id IN (${placeholders})`,
     ).run(...sceneIds, ...sceneIds)
