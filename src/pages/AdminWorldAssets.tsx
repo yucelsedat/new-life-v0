@@ -3,13 +3,16 @@ import { Link, useParams } from 'react-router-dom'
 import { FiArrowLeft, FiEdit3 } from 'react-icons/fi'
 import { useT } from '../i18n'
 import ImageLibrarySection from '../components/admin/ImageLibrarySection'
+import WorldNotesSection from '../components/admin/WorldNotesSection'
 
-type AssetTab = 'scene' | 'character'
+type AssetTab = 'scene' | 'character' | 'notes'
+type AssetTabLabelKey = 'scenesTab' | 'charactersTab' | 'notesTab'
 
 const TABS = [
   { id: 'scene', labelKey: 'scenesTab' },
   { id: 'character', labelKey: 'charactersTab' },
-] as const satisfies ReadonlyArray<{ id: AssetTab; labelKey: 'scenesTab' | 'charactersTab' }>
+  { id: 'notes', labelKey: 'notesTab' },
+] as const satisfies ReadonlyArray<{ id: AssetTab; labelKey: AssetTabLabelKey }>
 
 export default function AdminWorldAssets() {
   const t = useT()
@@ -75,14 +78,15 @@ export default function AdminWorldAssets() {
           })}
         </div>
 
-        {activeTab === 'scene' ? (
+        {activeTab === 'scene' && (
           <ImageLibrarySection
             title={t.admin.assets.scenesTitle}
             subtitle={t.admin.assets.scenesSubtitle}
             emptyLabel={t.admin.assets.scenesEmpty}
             scope={{ worldId, kind: 'scene' }}
           />
-        ) : (
+        )}
+        {activeTab === 'character' && (
           <ImageLibrarySection
             title={t.admin.assets.charactersTitle}
             subtitle={t.admin.assets.charactersSubtitle}
@@ -90,6 +94,7 @@ export default function AdminWorldAssets() {
             scope={{ worldId, kind: 'character' }}
           />
         )}
+        {activeTab === 'notes' && <WorldNotesSection worldId={worldId} />}
       </main>
     </div>
   )
