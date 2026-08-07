@@ -184,6 +184,8 @@ export const tr = {
       button: 'Assets',
       title: 'Dünya Assetleri',
       backToWorlds: 'Dünyalara Dön',
+      scenesTab: 'Sahneler',
+      charactersTab: 'Karakterler',
       scenesTitle: 'Sahne Resimleri',
       scenesSubtitle: 'Bu dünyanın sahnelerinde kullanılabilecek görseller.',
       scenesEmpty: 'Bu dünya için henüz sahne görseli yok. Yukarıdan yükleyebilirsin.',
