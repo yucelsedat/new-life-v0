@@ -75,6 +75,8 @@ function imageUsageSql(urlExpr: '?' | 'images.url'): string {
     UNION ALL
     SELECT 1 FROM scene_variants WHERE image_url = ${urlExpr}
     UNION ALL
+    SELECT 1 FROM scene_angles WHERE image_url = ${urlExpr}
+    UNION ALL
     SELECT 1 FROM story_frames WHERE image_url = ${urlExpr}
     UNION ALL
     SELECT 1 FROM worlds WHERE scene_image_url = ${urlExpr}
@@ -174,12 +176,16 @@ galleryRouter.post('/', (req, res) => {
 })
 
 function isUrlInUse(url: string): boolean {
-  const hit = db.prepare(`${imageUsageSql('?')} LIMIT 1`).get(url, url, url, url)
+  const sql = `${imageUsageSql('?')} LIMIT 1`
+  // One placeholder per branch of the union — bound from the SQL itself so adding a
+  // new place an image can be used never silently breaks the parameter count.
+  const params = Array<string>(sql.split('?').length - 1).fill(url)
+  const hit = db.prepare(sql).get(...params)
   return hit !== undefined
 }
 
 /**
- * Bulk delete. Images still referenced by a scene, option, story frame or world cover
+ * Bulk delete. Images still referenced by a scene, option, angle, story frame or world cover
  * are left untouched and reported back as `skipped` — deleting them would leave
  * dangling image URLs in the game.
  */
