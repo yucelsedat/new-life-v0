@@ -108,6 +108,16 @@ export const tr = {
       changeSceneButton: 'Sahneyi Değiştir',
       baseOption: 'Ana',
       optionShort: 'Seçenek',
+      optionTime: {
+        label: 'Aktifleşme saati',
+        baseHint: 'Dünya bu saatte açılır — tüm ana sahneler burada başlar.',
+        optionHint: 'Tüm sahnelerin {n}. seçeneği bu saatte devreye girer.',
+        placeholder: 'SS:DD',
+        invalid: 'Saati SS:DD biçiminde yaz (örn. 12:05).',
+        saving: 'Kaydediliyor…',
+        saved: 'Tüm sahnelerde güncellendi.',
+        saveError: 'Saat kaydedilemedi — sunucuya ulaşılamadı. Tekrar dene.',
+      },
       modal: {
         sceneNameLabel: 'Sahne Adı',
         linkNameLabel: 'Link Adı',

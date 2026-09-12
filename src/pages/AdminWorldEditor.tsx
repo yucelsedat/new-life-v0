@@ -15,10 +15,14 @@ import {
 import { useT } from '../i18n'
 import { useWorldEditor } from '../hooks/useWorldEditor'
 import { useUsedImages } from '../hooks/useUsedImages'
+import { useWorldOptionTimes } from '../hooks/useWorldOptionTimes'
+import { useAngleKeys } from '../hooks/useAngleKeys'
 import GalleryPickerModal from '../components/admin/GalleryPickerModal'
 import StoryPickerModal from '../components/admin/StoryPickerModal'
 import AnglePickerModal from '../components/admin/AnglePickerModal'
+import OptionTimeField from '../components/admin/OptionTimeField'
 import { clamp } from '../utils/helpers'
+import { formatClock } from '../utils/worldClock'
 import { viewKey } from '../types/world'
 import type { AngleDirection, SceneLink } from '../types/world'
 
@@ -100,6 +104,7 @@ export default function AdminWorldEditor() {
     updateLinkPosition,
   } = useWorldEditor(worldId ?? '')
   const { usedUrls, refetchUsed } = useUsedImages(worldId ?? '')
+  const { timeFor, setOptionTime } = useWorldOptionTimes(worldId ?? '')
 
   const [worldName, setWorldName] = useState<string | null>(null)
   const [modalMode, setModalMode] = useState<ModalMode>(null)
@@ -191,18 +196,23 @@ export default function AdminWorldEditor() {
   const hasNoScenes = !isLoading && scenes.length === 0
   const variantCount = currentScene?.variants?.length ?? 0
 
-  // The option strip: the scene image first, then each variant in creation order.
+  // The option strip: the scene image first, then the scene at each later moment of the
+  // world's day. An option's index is what the clock addresses, so it is world-wide —
+  // option 2 here and option 2 of every other scene share one activation time.
   const options = currentScene
     ? [
-        { key: 'base', imageUrl: currentScene.imageUrl, label: t.admin.editor.baseOption },
-        ...(currentScene.variants ?? []).map((variant, index) => ({
+        { key: 'base', optionIndex: 0, imageUrl: currentScene.imageUrl, label: t.admin.editor.baseOption },
+        ...(currentScene.variants ?? []).map((variant) => ({
           key: variant.id,
+          optionIndex: variant.optionIndex,
           imageUrl: variant.imageUrl,
-          label: `${t.admin.editor.optionShort} ${index + 1}`,
+          label: `${t.admin.editor.optionShort} ${variant.optionIndex}`,
         })),
       ]
     : []
-  const activeOptionImage = options.find((option) => option.key === activeOption)?.imageUrl ?? currentScene?.imageUrl
+  const activeOptionEntry = options.find((option) => option.key === activeOption)
+  const activeOptionImage = activeOptionEntry?.imageUrl ?? currentScene?.imageUrl
+  const activeOptionIndex = activeOptionEntry?.optionIndex ?? 0
 
   // Angles are a chain hanging off the active option; offset 0 is the option image itself.
   const optionAngles = currentScene?.angles?.[activeOption] ?? []
@@ -230,6 +240,14 @@ export default function AdminWorldEditor() {
     setAngleOffset(offset)
     setStoryIndex(-1)
   }
+
+  // A and D turn the camera as the on-screen arrows do. A picker on top of the scene is
+  // its own conversation, so the keys stay out of it until it closes.
+  useAngleKeys({
+    enabled: storyIndex < 0 && modalMode === null && !storyModalOpen && !angleModalOpen && !isSubmitting,
+    onLookLeft: () => canLookLeft && lookTowards(angleOffset - 1),
+    onLookRight: () => canLookRight && lookTowards(angleOffset + 1),
+  })
 
   return (
     <div className="relative h-screen max-h-screen w-screen overflow-hidden bg-void">
@@ -307,7 +325,7 @@ export default function AdminWorldEditor() {
             <button
               type="button"
               onClick={() => lookTowards(angleOffset - 1)}
-              title={t.admin.angle.lookLeft}
+              title={`${t.admin.angle.lookLeft} (A)`}
               className="absolute left-6 top-1/2 z-20 flex h-14 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
             >
               <FiArrowLeft className="h-6 w-6" />
@@ -318,44 +336,63 @@ export default function AdminWorldEditor() {
             <button
               type="button"
               onClick={() => lookTowards(angleOffset + 1)}
-              title={t.admin.angle.lookRight}
+              title={`${t.admin.angle.lookRight} (D)`}
               className="absolute right-6 top-1/2 z-20 flex h-14 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
             >
               <FiArrowRight className="h-6 w-6" />
             </button>
           )}
 
-          {options.length > 1 && (
-            <div className="absolute left-1/2 top-24 z-20 flex -translate-x-1/2 items-center gap-2 rounded-2xl border border-white/10 bg-black/50 p-2 backdrop-blur-md">
-              {options.map((option) => {
-                const optionHasStory = Object.entries(currentScene.stories ?? {}).some(
-                  ([key, frames]) => key.startsWith(`${option.key}#`) && frames.length > 0,
-                )
-                return (
-                  <button
-                    key={option.key}
-                    type="button"
-                    title={option.label}
-                    onClick={() => {
-                      setActiveOption(option.key)
-                      setAngleOffset(0)
-                      setStoryIndex(-1)
-                    }}
-                    className={`relative h-12 w-16 overflow-hidden rounded-lg border-2 transition ${
-                      activeOption === option.key ? 'border-gold-bright' : 'border-transparent hover:border-white/25'
-                    }`}
-                  >
-                    <img src={option.imageUrl} alt={option.label} className="h-full w-full object-cover" />
-                    {optionHasStory && (
-                      <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold-bright">
-                        <FiBookOpen className="h-2.5 w-2.5 text-abyss" />
+          <div className="absolute left-1/2 top-24 z-20 flex -translate-x-1/2 flex-col items-center gap-2.5">
+            {options.length > 1 && (
+              <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/50 p-2 backdrop-blur-md">
+                {options.map((option) => {
+                  const optionHasStory = Object.entries(currentScene.stories ?? {}).some(
+                    ([key, frames]) => key.startsWith(`${option.key}#`) && frames.length > 0,
+                  )
+                  return (
+                    <button
+                      key={option.key}
+                      type="button"
+                      title={option.label}
+                      onClick={() => {
+                        setActiveOption(option.key)
+                        setAngleOffset(0)
+                        setStoryIndex(-1)
+                      }}
+                      className={`relative h-12 w-16 overflow-hidden rounded-lg border-2 transition ${
+                        activeOption === option.key ? 'border-gold-bright' : 'border-transparent hover:border-white/25'
+                      }`}
+                    >
+                      <img src={option.imageUrl} alt={option.label} className="h-full w-full object-cover" />
+                      {optionHasStory && (
+                        <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-gold-bright">
+                          <FiBookOpen className="h-2.5 w-2.5 text-abyss" />
+                        </span>
+                      )}
+                      {/* The whole world flips at this minute, so it reads as the option's own stamp. */}
+                      <span className="absolute inset-x-0 bottom-0 bg-black/70 py-px text-center font-mono text-micro tabular-nums text-white/85">
+                        {formatClock(timeFor(option.optionIndex))}
                       </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          )}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Angles are views of one moment, so the schedule is only editable from the
+                option's own image — not from a turned-away angle. */}
+            {angleOffset === 0 && storyIndex < 0 && (
+              <OptionTimeField
+                // Another option is a different entry in the schedule, not a new value
+                // for this one — the field starts clean rather than carrying state over.
+                key={activeOptionIndex}
+                optionIndex={activeOptionIndex}
+                minuteOfDay={timeFor(activeOptionIndex)}
+                onSave={(minuteOfDay) => setOptionTime(activeOptionIndex, minuteOfDay)}
+              />
+            )}
+          </div>
 
           {angleOffset !== 0 && (
             <span className="absolute left-1/2 bottom-8 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/15 bg-black/60 px-3 py-1.5 font-mono text-micro text-white/80 backdrop-blur-md">

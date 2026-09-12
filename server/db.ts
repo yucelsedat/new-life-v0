@@ -123,7 +123,38 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS world_notes_by_world ON world_notes (world_id, position);
+
+  -- When each option index takes over, as minutes since midnight on the world clock.
+  -- Options are the same scene at a later moment, and every scene turns over together:
+  -- option 1 of the kitchen and option 1 of the hallway share one activation minute,
+  -- so the time belongs to the world, not to a single scene. Index 0 is the scene's own
+  -- image and doubles as the world's opening time; without a row it defaults to 12:00.
+  CREATE TABLE IF NOT EXISTS world_option_times (
+    world_id TEXT NOT NULL,
+    option_index INTEGER NOT NULL,
+    minute_of_day INTEGER NOT NULL,
+    PRIMARY KEY (world_id, option_index)
+  );
 `)
+
+// Options gained a place in that chain. They used to be an unordered set per scene, so
+// creation order is the order they were meant to unfold in.
+try {
+  db.exec(`ALTER TABLE scene_variants ADD COLUMN option_index INTEGER NOT NULL DEFAULT 0`)
+
+  const sceneIds = db
+    .prepare('SELECT DISTINCT scene_id FROM scene_variants')
+    .all() as { scene_id: string }[]
+  const byCreation = db.prepare('SELECT id FROM scene_variants WHERE scene_id = ? ORDER BY created_at ASC')
+  const setIndex = db.prepare('UPDATE scene_variants SET option_index = ? WHERE id = ?')
+
+  for (const { scene_id } of sceneIds) {
+    const variants = byCreation.all(scene_id) as { id: string }[]
+    variants.forEach((variant, index) => setIndex.run(index + 1, variant.id))
+  }
+} catch {
+  // column already exists
+}
 
 // Stories gained an angle: a story now hangs off one angle of one option, not the
 // whole option. Everything written before angles existed belongs to angle 0.

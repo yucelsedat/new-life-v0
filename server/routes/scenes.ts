@@ -29,6 +29,7 @@ interface SceneVariantRow {
   id: string
   scene_id: string
   image_url: string
+  option_index: number
   created_at: string
 }
 
@@ -37,13 +38,14 @@ function toSceneVariant(row: SceneVariantRow) {
     id: row.id,
     sceneId: row.scene_id,
     imageUrl: row.image_url,
+    optionIndex: row.option_index,
     createdAt: row.created_at,
   }
 }
 
 function loadVariants(sceneId: string) {
   const rows = db
-    .prepare('SELECT * FROM scene_variants WHERE scene_id = ? ORDER BY created_at ASC')
+    .prepare('SELECT * FROM scene_variants WHERE scene_id = ? ORDER BY option_index ASC')
     .all(sceneId) as SceneVariantRow[]
   return rows.map(toSceneVariant)
 }
@@ -367,14 +369,18 @@ scenesRouter.post('/:id/variants', (req, res) => {
     return
   }
 
+  // An option is the scene one step further along the world's clock, so it lands at the
+  // end of this scene's chain — and shares that index's activation time with every
+  // other scene's option of the same index.
+  const highest = db
+    .prepare('SELECT MAX(option_index) AS highest FROM scene_variants WHERE scene_id = ?')
+    .get(req.params.id) as { highest: number | null }
+
   const id = randomUUID()
   const now = new Date().toISOString()
-  db.prepare('INSERT INTO scene_variants (id, scene_id, image_url, created_at) VALUES (?, ?, ?, ?)').run(
-    id,
-    req.params.id,
-    imageUrl,
-    now,
-  )
+  db.prepare(
+    'INSERT INTO scene_variants (id, scene_id, image_url, option_index, created_at) VALUES (?, ?, ?, ?, ?)',
+  ).run(id, req.params.id, imageUrl, (highest.highest ?? 0) + 1, now)
 
   const row = db.prepare('SELECT * FROM scene_variants WHERE id = ?').get(id) as SceneVariantRow
   res.status(201).json(toSceneVariant(row))
@@ -403,6 +409,13 @@ scenesRouter.delete('/:id/variants/:variantId', (req, res) => {
     WHERE variant_id = ? AND link_id IN (SELECT id FROM scene_links WHERE from_scene_id = ?)
   `).run(req.params.variantId, req.params.id)
   db.prepare('DELETE FROM scene_variants WHERE id = ?').run(req.params.variantId)
+
+  // Indices address a moment on the world clock, so a hole would strand every later
+  // option one step behind the rest of the world — close it.
+  db.prepare(
+    'UPDATE scene_variants SET option_index = option_index - 1 WHERE scene_id = ? AND option_index > ?',
+  ).run(req.params.id, existing.option_index)
+
   res.status(204).end()
 })
 

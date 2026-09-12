@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { FiArrowLeft, FiArrowRight } from 'react-icons/fi'
+import { FiArrowLeft, FiArrowRight, FiClock } from 'react-icons/fi'
 import { useWorldEditor } from '../hooks/useWorldEditor'
+import { useWorldClock } from '../hooks/useWorldClock'
+import { useAngleKeys } from '../hooks/useAngleKeys'
+import { useWorldOptionTimes } from '../hooks/useWorldOptionTimes'
+import { activeOptionIndex, formatClock, minuteOfDayFor } from '../utils/worldClock'
 import { viewKey } from '../types/world'
 import type { SceneLink } from '../types/world'
 
@@ -32,38 +36,46 @@ function ScenePinButton({
 export default function Game() {
   const { worldId } = useParams<{ worldId: string }>()
   const { currentScene, isLoading, scenes, goToScene } = useWorldEditor(worldId ?? '')
+  const { optionTimes } = useWorldOptionTimes(worldId ?? '')
 
-  /** How many times each scene has been entered this session — drives variant cycling. */
-  const [visitCounts, setVisitCounts] = useState<Record<string, number>>({})
+  // The world runs on its own clock; how far it has got decides which version of every
+  // scene is standing, so the whole world moves on together.
+  const elapsedMinutes = useWorldClock()
+  const clock = formatClock(minuteOfDayFor(optionTimes, elapsedMinutes))
+  const worldOptionIndex = activeOptionIndex(optionTimes, elapsedMinutes)
 
   const currentSceneId = currentScene?.id
-  useEffect(() => {
-    if (!currentSceneId) return
-    setVisitCounts((prev) => ({ ...prev, [currentSceneId]: (prev[currentSceneId] ?? 0) + 1 }))
-  }, [currentSceneId])
 
   /** -1 = showing the view image; 0..n-1 = a story frame of the active view. */
   const [storyIndex, setStoryIndex] = useState(-1)
   /** Which way the player has turned within the active option. 0 = the option image. */
   const [angleOffset, setAngleOffset] = useState(0)
-  useEffect(() => {
-    setStoryIndex(-1)
-    setAngleOffset(0)
-  }, [currentSceneId])
 
   /**
-   * First visit shows the scene's base image; each subsequent visit advances to the
-   * next configured option, wrapping back around to the base image.
+   * The scene as of now: its latest option at or before the world's current index. A
+   * scene with fewer options than the world has reached simply stays at its last one.
    */
   const activeOption = useMemo(() => {
     if (!currentScene) return null
     const options = [
-      { key: 'base', imageUrl: currentScene.imageUrl },
-      ...(currentScene.variants ?? []).map((variant) => ({ key: variant.id, imageUrl: variant.imageUrl })),
+      { key: 'base', optionIndex: 0, imageUrl: currentScene.imageUrl },
+      ...(currentScene.variants ?? []).map((variant) => ({
+        key: variant.id,
+        optionIndex: variant.optionIndex,
+        imageUrl: variant.imageUrl,
+      })),
     ]
-    const visits = visitCounts[currentScene.id] ?? 1
-    return options[(visits - 1) % options.length]
-  }, [currentScene, visitCounts])
+    const reached = options.filter((option) => option.optionIndex <= worldOptionIndex)
+    return reached[reached.length - 1] ?? options[0]
+  }, [currentScene, worldOptionIndex])
+
+  // Walking into a scene, and the world moving on under your feet, both land you on a
+  // fresh view — the story starts over and the camera faces forward again.
+  const activeOptionKey = activeOption?.key
+  useEffect(() => {
+    setStoryIndex(-1)
+    setAngleOffset(0)
+  }, [currentSceneId, activeOptionKey])
 
   // Turning left or right stays inside the scene — the same exits remain reachable,
   // just placed where they belong in that view.
@@ -86,6 +98,14 @@ export default function Game() {
     setStoryIndex(-1)
   }
 
+  // A and D do what the on-screen arrows do, and are just as limited by where the
+  // scene actually has an angle to turn to.
+  useAngleKeys({
+    enabled: storyIndex < 0,
+    onLookLeft: () => canLookLeft && lookTowards(angleOffset - 1),
+    onLookRight: () => canLookRight && lookTowards(angleOffset + 1),
+  })
+
   return (
     <div className="relative h-screen max-h-screen w-screen overflow-hidden bg-void">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-6 py-5">
@@ -95,6 +115,11 @@ export default function Game() {
         >
           Ana Menüye Dön
         </Link>
+
+        <span className="flex items-center gap-2 rounded-full border border-white/15 bg-black/50 px-4 py-2 backdrop-blur-md">
+          <FiClock className="h-4 w-4 text-gold-bright" />
+          <span className="font-mono text-h3 font-[200] tabular-nums tracking-widest text-white/95">{clock}</span>
+        </span>
       </div>
 
       {!isLoading && scenes.length === 0 && (
@@ -135,6 +160,7 @@ export default function Game() {
             <button
               type="button"
               onClick={() => lookTowards(angleOffset - 1)}
+              title="Sola bak (A)"
               className="absolute left-6 top-1/2 z-20 flex h-16 w-16 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
             >
               <FiArrowLeft className="h-7 w-7" />
@@ -145,6 +171,7 @@ export default function Game() {
             <button
               type="button"
               onClick={() => lookTowards(angleOffset + 1)}
+              title="Sağa bak (D)"
               className="absolute right-6 top-1/2 z-20 flex h-16 w-16 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
             >
               <FiArrowRight className="h-7 w-7" />
