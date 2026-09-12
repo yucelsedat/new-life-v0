@@ -63,11 +63,23 @@ export interface SceneLink {
   anglePositions?: Record<string, { positionX: number; positionY: number }>
 }
 
+/**
+ * The same scene at a later point on the world clock. `optionIndex` is its place in that
+ * chain (1 is the first option after the scene's own image, which is index 0) and is
+ * shared world-wide: option 2 of every scene turns over at the same minute.
+ */
 export interface SceneVariant {
   id: string
   sceneId: string
   imageUrl: string
+  optionIndex: number
   createdAt: string
+}
+
+/** When one option index takes over, as minutes since midnight on the world clock. */
+export interface WorldOptionTime {
+  optionIndex: number
+  minuteOfDay: number
 }
 
 export type AngleDirection = 'left' | 'right'

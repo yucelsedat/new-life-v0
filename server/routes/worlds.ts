@@ -43,6 +43,31 @@ function toWorld(row: WorldRow) {
   }
 }
 
+/** Minutes since midnight. A world's clock opens at noon unless option 0 says otherwise. */
+const DEFAULT_START_MINUTE = 12 * 60
+const MINUTES_PER_DAY = 24 * 60
+
+interface OptionTimeRow {
+  option_index: number
+  minute_of_day: number
+}
+
+/**
+ * The activation minute of every option index of a world. Option 0 is always present:
+ * it is the scene's own image, so its time is where the world's clock starts.
+ */
+function loadOptionTimes(worldId: string) {
+  const rows = db
+    .prepare('SELECT option_index, minute_of_day FROM world_option_times WHERE world_id = ? ORDER BY option_index ASC')
+    .all(worldId) as OptionTimeRow[]
+
+  const times = rows.map((row) => ({ optionIndex: row.option_index, minuteOfDay: row.minute_of_day }))
+  if (!times.some((time) => time.optionIndex === 0)) {
+    times.unshift({ optionIndex: 0, minuteOfDay: DEFAULT_START_MINUTE })
+  }
+  return times
+}
+
 worldsRouter.get('/', (_req, res) => {
   const rows = db.prepare('SELECT * FROM worlds ORDER BY slot ASC').all() as WorldRow[]
   res.json(rows.map(toWorld))
@@ -185,6 +210,46 @@ worldsRouter.get('/:id/deletion-summary', (req, res) => {
   })
 })
 
+worldsRouter.get('/:id/option-times', (req, res) => {
+  const world = db.prepare('SELECT id FROM worlds WHERE id = ?').get(req.params.id)
+  if (!world) {
+    res.status(404).json({ error: 'World not found' })
+    return
+  }
+  res.json(loadOptionTimes(req.params.id))
+})
+
+/**
+ * Set when one option index takes over. The whole world turns over at once, so this is
+ * deliberately not per scene: writing option 2's time here moves option 2 of every scene.
+ */
+worldsRouter.put('/:id/option-times/:optionIndex', (req, res) => {
+  const world = db.prepare('SELECT id FROM worlds WHERE id = ?').get(req.params.id)
+  if (!world) {
+    res.status(404).json({ error: 'World not found' })
+    return
+  }
+
+  const optionIndex = Number(req.params.optionIndex)
+  if (!Number.isInteger(optionIndex) || optionIndex < 0) {
+    res.status(400).json({ error: 'optionIndex must be a non-negative integer' })
+    return
+  }
+
+  const { minuteOfDay } = req.body as { minuteOfDay?: number }
+  if (!Number.isInteger(minuteOfDay) || minuteOfDay! < 0 || minuteOfDay! >= MINUTES_PER_DAY) {
+    res.status(400).json({ error: 'minuteOfDay must be an integer between 0 and 1439' })
+    return
+  }
+
+  db.prepare(`
+    INSERT INTO world_option_times (world_id, option_index, minute_of_day) VALUES (?, ?, ?)
+    ON CONFLICT (world_id, option_index) DO UPDATE SET minute_of_day = excluded.minute_of_day
+  `).run(req.params.id, optionIndex, minuteOfDay!)
+
+  res.json(loadOptionTimes(req.params.id))
+})
+
 worldsRouter.delete('/:id', (req, res) => {
   const world = db.prepare('SELECT * FROM worlds WHERE id = ?').get(req.params.id) as WorldRow | undefined
   if (!world) {
@@ -217,6 +282,7 @@ worldsRouter.delete('/:id', (req, res) => {
   db.prepare('DELETE FROM scenes WHERE world_id = ?').run(req.params.id)
   db.prepare('DELETE FROM images WHERE world_id = ?').run(req.params.id)
   db.prepare('DELETE FROM world_notes WHERE world_id = ?').run(req.params.id)
+  db.prepare('DELETE FROM world_option_times WHERE world_id = ?').run(req.params.id)
   db.prepare('DELETE FROM worlds WHERE id = ?').run(req.params.id)
 
   // Delete a file only once no image record anywhere still points at it — the same
