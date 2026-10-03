@@ -22,6 +22,7 @@ interface SceneLinkRow {
   label: string
   position_x: number
   position_y: number
+  angle_offset: number
   created_at: string
 }
 
@@ -206,8 +207,62 @@ function toSceneLink(row: SceneLinkRow) {
     label: row.label,
     positionX: row.position_x,
     positionY: row.position_y,
+    angleOffset: row.angle_offset,
     createdAt: row.created_at,
   }
+}
+
+/** A scene's links as the editor and the game read them: target name and placements included. */
+function loadLinks(sceneId: string) {
+  const linkRows = db.prepare('SELECT * FROM scene_links WHERE from_scene_id = ?').all(sceneId) as SceneLinkRow[]
+
+  return linkRows.map((linkRow) => {
+    const targetScene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(linkRow.to_scene_id) as
+      | SceneRow
+      | undefined
+    return {
+      ...toSceneLink(linkRow),
+      toSceneName: targetScene?.name ?? null,
+      anglePositions: loadLinkAnglePositions(linkRow.id),
+    }
+  })
+}
+
+/**
+ * Every angle a link can sit on: the option image (0) and any offset at least one
+ * option has an angle for. A link belongs to an angle across all options, so an offset
+ * only one option has turned to still counts.
+ */
+function sceneOffsets(sceneId: string): number[] {
+  const rows = db
+    .prepare('SELECT DISTINCT angle_offset FROM scene_angles WHERE scene_id = ?')
+    .all(sceneId) as { angle_offset: number }[]
+  return [0, ...rows.map((row) => row.angle_offset).filter((offset) => offset !== 0)]
+}
+
+function linkAt(sceneId: string, angleOffset: number, exceptLinkId?: string) {
+  return db
+    .prepare('SELECT id FROM scene_links WHERE from_scene_id = ? AND angle_offset = ? AND id IS NOT ?')
+    .get(sceneId, angleOffset, exceptLinkId ?? null) as { id: string } | undefined
+}
+
+/** The view nearest the option image that has no exit yet, or null when every one is taken. */
+function firstFreeOffset(sceneId: string): number | null {
+  const offsets = sceneOffsets(sceneId).sort((a, b) => Math.abs(a) - Math.abs(b) || b - a)
+  return offsets.find((offset) => !linkAt(sceneId, offset)) ?? null
+}
+
+/**
+ * A link whose angle no option has any more cannot be seen or reached, so it falls back
+ * to the option image — even if that already holds an exit, since losing the link
+ * silently would be worse. The author can move it on from there.
+ */
+function rehomeStrandedLinks(sceneId: string) {
+  const offsets = sceneOffsets(sceneId)
+  db.prepare(
+    `UPDATE scene_links SET angle_offset = 0
+     WHERE from_scene_id = ? AND angle_offset NOT IN (${offsets.map(() => '?').join(',')})`,
+  ).run(sceneId, ...offsets)
 }
 
 scenesRouter.get('/', (req, res) => {
@@ -255,24 +310,9 @@ scenesRouter.get('/:id', (req, res) => {
     return
   }
 
-  const linkRows = db
-    .prepare('SELECT * FROM scene_links WHERE from_scene_id = ?')
-    .all(req.params.id) as SceneLinkRow[]
-
-  const links = linkRows.map((linkRow) => {
-    const targetScene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(linkRow.to_scene_id) as
-      | SceneRow
-      | undefined
-    return {
-      ...toSceneLink(linkRow),
-      toSceneName: targetScene?.name ?? null,
-      anglePositions: loadLinkAnglePositions(linkRow.id),
-    }
-  })
-
   res.json({
     ...toScene(row),
-    links,
+    links: loadLinks(row.id),
     variants: loadVariants(row.id),
     angles: loadAngles(row.id),
     stories: loadStories(row.id),
@@ -409,6 +449,7 @@ scenesRouter.delete('/:id/variants/:variantId', (req, res) => {
     WHERE variant_id = ? AND link_id IN (SELECT id FROM scene_links WHERE from_scene_id = ?)
   `).run(req.params.variantId, req.params.id)
   db.prepare('DELETE FROM scene_variants WHERE id = ?').run(req.params.variantId)
+  rehomeStrandedLinks(req.params.id)
 
   // Indices address a moment on the world clock, so a hole would strand every later
   // option one step behind the rest of the world — close it.
@@ -547,8 +588,9 @@ scenesRouter.delete('/:id/angles/:angleId', (req, res) => {
     deleteAngleDependents(req.params.id, row.variant_id, row.angle_offset)
     db.prepare('DELETE FROM scene_angles WHERE id = ?').run(row.id)
   }
+  rehomeStrandedLinks(req.params.id)
 
-  res.json({ removedOffsets: orphaned.map((row) => row.angle_offset) })
+  res.json({ removedOffsets: orphaned.map((row) => row.angle_offset), links: loadLinks(req.params.id) })
 })
 
 scenesRouter.post('/', (req, res) => {
@@ -638,12 +680,17 @@ scenesRouter.patch('/:id/position', (req, res) => {
   res.json(toScene(row))
 })
 
+/**
+ * Create a new scene and link to it from one view of this one. `angleOffset` omitted
+ * means the option image. Each view holds at most one exit, so a taken view is refused.
+ */
 scenesRouter.post('/:id/links', (req, res) => {
-  const { label, imageUrl, positionX, positionY } = req.body as {
+  const { label, imageUrl, positionX, positionY, angleOffset } = req.body as {
     label?: string
     imageUrl?: string
     positionX?: number
     positionY?: number
+    angleOffset?: number
   }
   if (!label || !imageUrl) {
     res.status(400).json({ error: 'label and imageUrl are required' })
@@ -653,6 +700,20 @@ scenesRouter.post('/:id/links', (req, res) => {
   const originRow = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
   if (!originRow) {
     res.status(404).json({ error: 'Origin scene not found' })
+    return
+  }
+
+  const offset = parseAngleOffset(angleOffset)
+  if (offset === null) {
+    res.status(400).json({ error: 'angleOffset must be an integer' })
+    return
+  }
+  if (!sceneOffsets(originRow.id).includes(offset)) {
+    res.status(404).json({ error: 'Angle not found on this scene' })
+    return
+  }
+  if (linkAt(originRow.id, offset)) {
+    res.status(409).json({ error: 'This view already has a scene link' })
     return
   }
 
@@ -669,14 +730,15 @@ scenesRouter.post('/:id/links', (req, res) => {
 
   const forwardId = randomUUID()
   db.prepare(`
-    INSERT INTO scene_links (id, from_scene_id, to_scene_id, label, position_x, position_y, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(forwardId, originRow.id, targetId, label, positionX ?? 50, positionY ?? 50, now)
+    INSERT INTO scene_links (id, from_scene_id, to_scene_id, label, position_x, position_y, angle_offset, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(forwardId, originRow.id, targetId, label, positionX ?? 50, positionY ?? 50, offset, now)
 
+  // The new scene is empty, so the way back takes its option image.
   const backwardId = randomUUID()
   db.prepare(`
-    INSERT INTO scene_links (id, from_scene_id, to_scene_id, label, position_x, position_y, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO scene_links (id, from_scene_id, to_scene_id, label, position_x, position_y, angle_offset, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?)
   `).run(backwardId, targetId, originRow.id, originRow.name, 50, 50, now)
 
   const targetRow = db.prepare('SELECT * FROM scenes WHERE id = ?').get(targetId) as SceneRow
@@ -706,19 +768,28 @@ scenesRouter.post('/:id/connect', (req, res) => {
     return
   }
 
+  // Both ends need a free view to hang their exit on; the canvas has no view on screen,
+  // so each takes the one nearest its option image.
+  const forwardOffset = firstFreeOffset(originRow.id)
+  const backwardOffset = firstFreeOffset(targetRow.id)
+  if (forwardOffset === null || backwardOffset === null) {
+    res.status(409).json({ error: 'Every view of one of these scenes already has a scene link' })
+    return
+  }
+
   const now = new Date().toISOString()
 
   const forwardId = randomUUID()
   db.prepare(`
-    INSERT INTO scene_links (id, from_scene_id, to_scene_id, label, position_x, position_y, created_at)
-    VALUES (?, ?, ?, ?, 50, 50, ?)
-  `).run(forwardId, originRow.id, targetRow.id, label, now)
+    INSERT INTO scene_links (id, from_scene_id, to_scene_id, label, position_x, position_y, angle_offset, created_at)
+    VALUES (?, ?, ?, ?, 50, 50, ?, ?)
+  `).run(forwardId, originRow.id, targetRow.id, label, forwardOffset, now)
 
   const backwardId = randomUUID()
   db.prepare(`
-    INSERT INTO scene_links (id, from_scene_id, to_scene_id, label, position_x, position_y, created_at)
-    VALUES (?, ?, ?, ?, 50, 50, ?)
-  `).run(backwardId, targetRow.id, originRow.id, originRow.name, now)
+    INSERT INTO scene_links (id, from_scene_id, to_scene_id, label, position_x, position_y, angle_offset, created_at)
+    VALUES (?, ?, ?, ?, 50, 50, ?, ?)
+  `).run(backwardId, targetRow.id, originRow.id, originRow.name, backwardOffset, now)
 
   const forwardRow = db.prepare('SELECT * FROM scene_links WHERE id = ?').get(forwardId) as SceneLinkRow
   const backwardRow = db.prepare('SELECT * FROM scene_links WHERE id = ?').get(backwardId) as SceneLinkRow
@@ -730,9 +801,9 @@ scenesRouter.post('/:id/connect', (req, res) => {
 })
 
 /**
- * Move a link's pin. Without `variantId`/`angleOffset` — or on the base option at angle 0
- * — this moves the link itself, which is where every view falls back to. On any other
- * angle it records a placement override for just that view.
+ * Move a link's pin. On the base option at the link's own angle this moves the link
+ * itself, which is where every option falls back to. In any other option it records a
+ * placement override for just that view.
  */
 sceneLinksRouter.patch('/:id', (req, res) => {
   const { positionX, positionY, variantId, angleOffset } = req.body as {
@@ -756,13 +827,18 @@ sceneLinksRouter.patch('/:id', (req, res) => {
   }
   const targetVariant = toVariantId(variantId)
 
-  if (targetVariant === null && offset === 0) {
+  if (targetVariant === null && offset === existing.angle_offset) {
     const nextX = positionX ?? existing.position_x
     const nextY = positionY ?? existing.position_y
     db.prepare('UPDATE scene_links SET position_x = ?, position_y = ? WHERE id = ?').run(
       nextX,
       nextY,
       req.params.id,
+    )
+    // A placement left here from before the link moved would shadow the one just made.
+    db.prepare('DELETE FROM scene_link_angles WHERE link_id = ? AND variant_id IS NULL AND angle_offset = ?').run(
+      req.params.id,
+      offset,
     )
 
     const row = db.prepare('SELECT * FROM scene_links WHERE id = ?').get(req.params.id) as SceneLinkRow
@@ -792,4 +868,38 @@ sceneLinksRouter.patch('/:id', (req, res) => {
   }
 
   res.json({ ...toSceneLink(existing), anglePositions: loadLinkAnglePositions(req.params.id) })
+})
+
+/**
+ * Hang a link on another view of its scene. The target view must exist on at least one
+ * option and must not already hold an exit. Per-view pin placements are kept, so a link
+ * moved back to a view it has been on before lands where it was left.
+ */
+sceneLinksRouter.patch('/:id/angle', (req, res) => {
+  const { angleOffset } = req.body as { angleOffset?: number }
+  const existing = db.prepare('SELECT * FROM scene_links WHERE id = ?').get(req.params.id) as
+    | SceneLinkRow
+    | undefined
+  if (!existing) {
+    res.status(404).json({ error: 'Scene link not found' })
+    return
+  }
+
+  const offset = parseAngleOffset(angleOffset)
+  if (offset === null) {
+    res.status(400).json({ error: 'angleOffset must be an integer' })
+    return
+  }
+  if (!sceneOffsets(existing.from_scene_id).includes(offset)) {
+    res.status(404).json({ error: 'Angle not found on this scene' })
+    return
+  }
+  if (linkAt(existing.from_scene_id, offset, existing.id)) {
+    res.status(409).json({ error: 'That view already has a scene link' })
+    return
+  }
+
+  db.prepare('UPDATE scene_links SET angle_offset = ? WHERE id = ?').run(offset, req.params.id)
+  const row = db.prepare('SELECT * FROM scene_links WHERE id = ?').get(req.params.id) as SceneLinkRow
+  res.json({ ...toSceneLink(row), anglePositions: loadLinkAnglePositions(req.params.id) })
 })

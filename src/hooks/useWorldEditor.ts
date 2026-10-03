@@ -8,7 +8,7 @@ export interface UseWorldEditorResult {
   isLoading: boolean
   error: string | null
   createFirstScene: (name: string, imageUrl: string) => Promise<void>
-  createLink: (label: string, imageUrl: string, positionX?: number, positionY?: number) => Promise<void>
+  createLink: (label: string, imageUrl: string, angleOffset: number) => Promise<void>
   createVariant: (imageUrl: string) => Promise<void>
   createAngle: (
     optionKey: string,
@@ -20,6 +20,7 @@ export interface UseWorldEditorResult {
   saveStory: (optionKey: string, angleOffset: number, imageUrls: string[]) => Promise<void>
   changeViewImage: (optionKey: string, angleOffset: number, imageUrl: string) => Promise<void>
   goToScene: (sceneId: string) => Promise<void>
+  moveLinkToAngle: (linkId: string, angleOffset: number) => Promise<void>
   updateLinkPosition: (
     linkId: string,
     optionKey: string,
@@ -92,15 +93,16 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     [worldId],
   )
 
+  /** A new scene reached from the view on screen — `angleOffset` is the angle it hangs off. */
   const createLink = useCallback(
-    async (label: string, imageUrl: string, positionX = 50, positionY = 50) => {
+    async (label: string, imageUrl: string, angleOffset: number) => {
       if (!currentScene) return
       setError(null)
       try {
         const response = await fetch(`/api/scenes/${currentScene.id}/links`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ label, imageUrl, positionX, positionY }),
+          body: JSON.stringify({ label, imageUrl, angleOffset }),
         })
         if (!response.ok) throw new Error(`Request failed: ${response.status}`)
         const { scene, link } = (await response.json()) as { scene: WorldScene; link: SceneLink }
@@ -169,7 +171,12 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
       try {
         const response = await fetch(`/api/scenes/${currentScene.id}/angles/${angleId}`, { method: 'DELETE' })
         if (!response.ok) throw new Error(`Request failed: ${response.status}`)
-        const { removedOffsets } = (await response.json()) as { removedOffsets: number[] }
+        // Links whose angle is gone everywhere fall back to the option image, so the
+        // server hands back the scene's links as they now stand.
+        const { removedOffsets, links } = (await response.json()) as {
+          removedOffsets: number[]
+          links: SceneLink[]
+        }
         const removed = new Set(removedOffsets)
         setCurrentScene((prev) => {
           if (!prev) return prev
@@ -177,6 +184,7 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
           for (const offset of removed) delete stories[viewKey(optionKey, offset)]
           return {
             ...prev,
+            links,
             angles: {
               ...(prev.angles ?? {}),
               [optionKey]: (prev.angles?.[optionKey] ?? []).filter((angle) => !removed.has(angle.offset)),
@@ -281,21 +289,44 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     }
   }, [])
 
+  /** Hang a link on another view of the same scene. The server refuses a view that is taken. */
+  const moveLinkToAngle = useCallback(async (linkId: string, angleOffset: number) => {
+    setError(null)
+    try {
+      const response = await fetch(`/api/scene-links/${linkId}/angle`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ angleOffset }),
+      })
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`)
+      const moved = (await response.json()) as SceneLink
+      setCurrentScene((prev) =>
+        prev
+          ? { ...prev, links: (prev.links ?? []).map((link) => (link.id === linkId ? { ...link, ...moved } : link)) }
+          : prev,
+      )
+    } catch {
+      setError('update-failed')
+    }
+  }, [])
+
   /**
-   * A pin dragged on the base option's own image moves the link everywhere it has no
-   * placement of its own; dragged on any other angle it only moves there.
+   * A pin dragged on the base option at the link's own angle moves the link everywhere it
+   * has no placement of its own; dragged in any other option it only moves there.
    */
   const updateLinkPosition = useCallback(
     (linkId: string, optionKey: string, angleOffset: number, positionX: number, positionY: number) => {
-      const isFallbackView = optionKey === 'base' && angleOffset === 0
-
       setCurrentScene((prev) => {
         if (!prev || !prev.links) return prev
         return {
           ...prev,
           links: prev.links.map((link) => {
             if (link.id !== linkId) return link
-            if (isFallbackView) return { ...link, positionX, positionY }
+            if (optionKey === 'base' && angleOffset === link.angleOffset) {
+              // Mirrors the server: a stale placement for this view would shadow the move.
+              const { [viewKey(optionKey, angleOffset)]: _stale, ...anglePositions } = link.anglePositions ?? {}
+              return { ...link, positionX, positionY, anglePositions }
+            }
             return {
               ...link,
               anglePositions: {
@@ -334,6 +365,7 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     saveStory,
     changeViewImage,
     goToScene,
+    moveLinkToAngle,
     updateLinkPosition,
   }
 }

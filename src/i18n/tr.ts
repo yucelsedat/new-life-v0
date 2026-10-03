@@ -98,6 +98,7 @@ export const tr = {
       backToWorlds: 'Dünyalara Dön',
       firstScenePrompt: 'İlk Sahneni Oluştur',
       createLinkButton: 'Sahne Linki Oluştur',
+      followLink: '{label} sahnesine git (W)',
       creating: 'Oluşturuluyor…',
       loadError: 'Sahne yüklenemedi.',
       canvasButton: 'Canvas',
@@ -143,6 +144,13 @@ export const tr = {
       deleteButton: 'Bu Açıyı Sil',
       counter: 'Açı {i}',
       baseView: 'Ana açı',
+    },
+    linkMove: {
+      button: 'Linki Taşı',
+      title: '“{label}” linkini taşı',
+      here: 'Link şu an bu açıda.',
+      taken: 'Bu açıda zaten bir sahne linki var.',
+      noOtherAngle: 'Linki taşımak için önce başka bir açı ekle.',
     },
     story: {
       modalTitle: 'Hikaye Oluştur',

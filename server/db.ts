@@ -79,7 +79,7 @@ db.exec(`
   );
 
   -- A different viewing direction of one option of a scene — still the same scene,
-  -- so it inherits that scene's links. angle_offset is signed and relative to the
+  -- so it can hold one of that scene's links. angle_offset is signed and relative to the
   -- option's own image: 0 is the option image itself (never stored here),
   -- +1/+2… are successive turns to the right, -1/-2… to the left.
   CREATE TABLE IF NOT EXISTS scene_angles (
@@ -94,10 +94,10 @@ db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS scene_angles_slot
     ON scene_angles (scene_id, IFNULL(variant_id, ''), angle_offset);
 
-  -- Per-angle placement of a scene link. A link is drawn on every angle, but the exit
-  -- it marks sits elsewhere in the frame once you turn, so each angle may override the
-  -- link's own position_x/position_y. The base option at angle 0 has no row here — it
-  -- keeps using the link row itself.
+  -- Per-view placement of a scene link. A link is drawn on its angle in every option,
+  -- but the exit it marks may sit elsewhere in each option's frame, so each view may
+  -- override the link's own position_x/position_y. The base option at angle 0 has no
+  -- row here — it keeps using the link row itself.
   CREATE TABLE IF NOT EXISTS scene_link_angles (
     link_id TEXT NOT NULL,
     variant_id TEXT,
@@ -160,6 +160,15 @@ try {
 // whole option. Everything written before angles existed belongs to angle 0.
 try {
   db.exec(`ALTER TABLE story_frames ADD COLUMN angle_offset INTEGER NOT NULL DEFAULT 0`)
+} catch {
+  // column already exists
+}
+
+// Links gained an angle: each view of a scene — the option image and every angle —
+// holds at most one exit, so a link now names the angle it is drawn on. It is the
+// same angle across every option. Links written before this sat on the option image.
+try {
+  db.exec(`ALTER TABLE scene_links ADD COLUMN angle_offset INTEGER NOT NULL DEFAULT 0`)
 } catch {
   // column already exists
 }
