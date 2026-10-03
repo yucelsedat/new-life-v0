@@ -57,9 +57,17 @@ export interface SceneLink {
   label: string
   positionX: number
   positionY: number
+  /**
+   * The angle the link is drawn on, in every option. Each view — the option image and
+   * each of its angles — holds at most one link.
+   */
+  angleOffset: number
   createdAt: string
   toSceneName?: string | null
-  /** Per-view pin placement, keyed by {@link viewKey}. Missing = use positionX/positionY. */
+  /**
+   * Per-view pin placement, keyed by {@link viewKey}. Missing = use positionX/positionY,
+   * which is the placement on the base option at the link's own angle.
+   */
   anglePositions?: Record<string, { positionX: number; positionY: number }>
 }
 
@@ -115,6 +123,22 @@ export type SceneStories = Record<string, StoryFrame[]>
 /** Addresses one angle of one option: 'base#0', '<variantId>#-1', … */
 export function viewKey(optionKey: string, angleOffset: number): string {
   return `${optionKey}#${angleOffset}`
+}
+
+/**
+ * The offset one turn away from `offset`. The option image and its angles form a full
+ * circle, so turning past the last angle on one side comes back round from the other
+ * side — the way someone turning on the spot ends up facing where they started.
+ * Null when the option has no angles, since there is nowhere to turn to.
+ */
+export function turnAngle(offset: number, angles: SceneAngle[], direction: AngleDirection): number | null {
+  if (angles.length === 0) return null
+  // Offsets never leave gaps (deleting an angle takes everything beyond it too), so the
+  // circle is every offset from the leftmost angle to the rightmost one, 0 included.
+  const min = Math.min(0, ...angles.map((angle) => angle.offset))
+  const max = Math.max(0, ...angles.map((angle) => angle.offset))
+  if (direction === 'right') return offset >= max ? min : offset + 1
+  return offset <= min ? max : offset - 1
 }
 
 export interface WorldScene {

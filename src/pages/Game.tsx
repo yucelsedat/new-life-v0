@@ -4,9 +4,10 @@ import { FiArrowLeft, FiArrowRight, FiClock } from 'react-icons/fi'
 import { useWorldEditor } from '../hooks/useWorldEditor'
 import { useWorldClock } from '../hooks/useWorldClock'
 import { useAngleKeys } from '../hooks/useAngleKeys'
+import { useLinkKey } from '../hooks/useLinkKey'
 import { useWorldOptionTimes } from '../hooks/useWorldOptionTimes'
 import { activeOptionIndex, formatClock, minuteOfDayFor } from '../utils/worldClock'
-import { viewKey } from '../types/world'
+import { turnAngle, viewKey } from '../types/world'
 import type { SceneLink } from '../types/world'
 
 function ScenePinButton({
@@ -21,6 +22,7 @@ function ScenePinButton({
   return (
     <button
       type="button"
+      title={`${link.label} (W)`}
       style={{ left: `${position.x}%`, top: `${position.y}%` }}
       onClick={() => onNavigate(link.toSceneId)}
       className="group absolute flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-1.5"
@@ -77,20 +79,21 @@ export default function Game() {
     setAngleOffset(0)
   }, [currentSceneId, activeOptionKey])
 
-  // Turning left or right stays inside the scene — the same exits remain reachable,
-  // just placed where they belong in that view.
+  // Turning left or right stays inside the scene; each view shows the exit it holds.
   const optionAngles = activeOption ? (currentScene?.angles?.[activeOption.key] ?? []) : []
   const activeAngle = optionAngles.find((angle) => angle.offset === angleOffset)
   const viewImageUrl = angleOffset === 0 ? (activeOption?.imageUrl ?? null) : (activeAngle?.imageUrl ?? null)
-  const hasAngleAt = (offset: number) => offset === 0 || optionAngles.some((angle) => angle.offset === offset)
-  const canLookLeft = hasAngleAt(angleOffset - 1)
-  const canLookRight = hasAngleAt(angleOffset + 1)
+  const leftOffset = turnAngle(angleOffset, optionAngles, 'left')
+  const rightOffset = turnAngle(angleOffset, optionAngles, 'right')
 
   const currentViewKey = activeOption ? viewKey(activeOption.key, angleOffset) : null
   const storyFrames = currentViewKey ? (currentScene?.stories?.[currentViewKey] ?? []) : []
   const canAdvance = storyFrames.length > 0 && storyIndex < storyFrames.length - 1
   // With a story configured, the exits only appear once the player reaches its last frame.
   const showLinks = storyFrames.length === 0 ? storyIndex < 0 : storyIndex === storyFrames.length - 1
+  // Each link hangs off one angle; turning brings a different exit into view.
+  const viewLinks = (currentScene?.links ?? []).filter((link) => link.angleOffset === angleOffset)
+  const followLink = viewLinks[0]
   const displayedImageUrl = storyIndex >= 0 ? (storyFrames[storyIndex]?.imageUrl ?? viewImageUrl) : viewImageUrl
 
   function lookTowards(offset: number) {
@@ -98,12 +101,19 @@ export default function Game() {
     setStoryIndex(-1)
   }
 
-  // A and D do what the on-screen arrows do, and are just as limited by where the
-  // scene actually has an angle to turn to.
+  // A and D do what the on-screen arrows do, and are just as limited by whether the
+  // option has any angle to turn to.
   useAngleKeys({
     enabled: storyIndex < 0,
-    onLookLeft: () => canLookLeft && lookTowards(angleOffset - 1),
-    onLookRight: () => canLookRight && lookTowards(angleOffset + 1),
+    onLookLeft: () => leftOffset !== null && lookTowards(leftOffset),
+    onLookRight: () => rightOffset !== null && lookTowards(rightOffset),
+  })
+
+  // W walks through the exit on screen, just as clicking its pin does — so only once the
+  // pin is showing.
+  useLinkKey({
+    enabled: showLinks && followLink !== undefined,
+    onFollowLink: () => followLink && goToScene(followLink.toSceneId),
   })
 
   return (
@@ -141,7 +151,7 @@ export default function Game() {
           />
 
           {showLinks &&
-            (currentScene.links ?? []).map((link) => {
+            viewLinks.map((link) => {
               const override = currentViewKey ? link.anglePositions?.[currentViewKey] : undefined
               return (
                 <ScenePinButton
@@ -156,10 +166,10 @@ export default function Game() {
               )
             })}
 
-          {storyIndex < 0 && canLookLeft && (
+          {storyIndex < 0 && leftOffset !== null && (
             <button
               type="button"
-              onClick={() => lookTowards(angleOffset - 1)}
+              onClick={() => lookTowards(leftOffset)}
               title="Sola bak (A)"
               className="absolute left-6 top-1/2 z-20 flex h-16 w-16 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
             >
@@ -167,10 +177,10 @@ export default function Game() {
             </button>
           )}
 
-          {storyIndex < 0 && canLookRight && (
+          {storyIndex < 0 && rightOffset !== null && (
             <button
               type="button"
-              onClick={() => lookTowards(angleOffset + 1)}
+              onClick={() => lookTowards(rightOffset)}
               title="Sağa bak (D)"
               className="absolute right-6 top-1/2 z-20 flex h-16 w-16 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/45 text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
             >

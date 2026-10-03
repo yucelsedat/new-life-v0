@@ -17,26 +17,29 @@ import { useWorldEditor } from '../hooks/useWorldEditor'
 import { useUsedImages } from '../hooks/useUsedImages'
 import { useWorldOptionTimes } from '../hooks/useWorldOptionTimes'
 import { useAngleKeys } from '../hooks/useAngleKeys'
+import { useLinkKey } from '../hooks/useLinkKey'
 import GalleryPickerModal from '../components/admin/GalleryPickerModal'
 import StoryPickerModal from '../components/admin/StoryPickerModal'
 import AnglePickerModal from '../components/admin/AnglePickerModal'
 import OptionTimeField from '../components/admin/OptionTimeField'
+import LinkMoveMenu from '../components/admin/LinkMoveMenu'
 import { clamp } from '../utils/helpers'
 import { formatClock } from '../utils/worldClock'
-import { viewKey } from '../types/world'
+import { turnAngle, viewKey } from '../types/world'
 import type { AngleDirection, SceneLink } from '../types/world'
 
 type ModalMode = 'first-scene' | 'create-link' | 'create-variant' | 'change-image' | null
 
 interface ScenePinProps {
   link: SceneLink
+  title: string
   position: { x: number; y: number }
   containerRef: React.RefObject<HTMLDivElement | null>
   onDragEnd: (linkId: string, x: number, y: number) => void
   onNavigate: (sceneId: string) => void
 }
 
-function ScenePin({ link, position, containerRef, onDragEnd, onNavigate }: ScenePinProps) {
+function ScenePin({ link, title, position, containerRef, onDragEnd, onNavigate }: ScenePinProps) {
   const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null)
   const draggingRef = useRef(false)
   const movedRef = useRef(false)
@@ -72,6 +75,7 @@ function ScenePin({ link, position, containerRef, onDragEnd, onNavigate }: Scene
   return (
     <button
       type="button"
+      title={title}
       style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
       className="absolute flex -translate-x-1/2 -translate-y-1/2 cursor-grab flex-col items-center gap-1.5 active:cursor-grabbing"
       onPointerDown={handlePointerDown}
@@ -101,6 +105,7 @@ export default function AdminWorldEditor() {
     saveStory,
     changeViewImage,
     goToScene,
+    moveLinkToAngle,
     updateLinkPosition,
   } = useWorldEditor(worldId ?? '')
   const { usedUrls, refetchUsed } = useUsedImages(worldId ?? '')
@@ -174,13 +179,24 @@ export default function AdminWorldEditor() {
     }
   }
 
+  async function handleLinkMove(linkId: string, offset: number) {
+    setIsSubmitting(true)
+    try {
+      await moveLinkToAngle(linkId, offset)
+      // Follow the link to its new angle, where its pin is most likely to need placing.
+      lookTowards(offset)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   async function handleModalConfirm(name: string, imageUrl: string) {
     setIsSubmitting(true)
     try {
       if (modalMode === 'first-scene') {
         await createFirstScene(name, imageUrl)
       } else if (modalMode === 'create-link') {
-        await createLink(name, imageUrl)
+        await createLink(name, imageUrl, angleOffset)
       } else if (modalMode === 'create-variant') {
         await createVariant(imageUrl)
       } else if (modalMode === 'change-image') {
@@ -220,11 +236,13 @@ export default function AdminWorldEditor() {
   const viewImage = angleOffset === 0 ? activeOptionImage : activeAngle?.imageUrl
   const hasAngleAt = (offset: number) =>
     offset === 0 || optionAngles.some((angle) => angle.offset === offset)
-  const canLookLeft = hasAngleAt(angleOffset - 1)
-  const canLookRight = hasAngleAt(angleOffset + 1)
+  const leftOffset = turnAngle(angleOffset, optionAngles, 'left')
+  const rightOffset = turnAngle(angleOffset, optionAngles, 'right')
+  // Turning wraps round the circle, but a new angle can only be hung off the open end of
+  // the chain — a side that already has a neighbouring offset is taken.
   const takenDirections: AngleDirection[] = [
-    ...(canLookLeft ? (['left'] as const) : []),
-    ...(canLookRight ? (['right'] as const) : []),
+    ...(hasAngleAt(angleOffset - 1) ? (['left'] as const) : []),
+    ...(hasAngleAt(angleOffset + 1) ? (['right'] as const) : []),
   ]
 
   const currentViewKey = viewKey(activeOption, angleOffset)
@@ -235,6 +253,15 @@ export default function AdminWorldEditor() {
   // Links belong at the end of the narrative: with a story they surface on its last
   // frame, otherwise straight away on the view image.
   const showLinks = storyFrames.length === 0 ? storyIndex < 0 : storyIndex === storyFrames.length - 1
+  // A link hangs off one angle, in every option. Each view holds at most one — only a
+  // scene from before that rule can still have several on its option image.
+  const viewLinks = (currentScene?.links ?? []).filter((link) => link.angleOffset === angleOffset)
+  const followLink = viewLinks[0]
+  // The option image and its angles in turning order — where a link can be moved to.
+  const optionViews = [
+    ...(activeOptionImage ? [{ offset: 0, imageUrl: activeOptionImage }] : []),
+    ...optionAngles.map((angle) => ({ offset: angle.offset, imageUrl: angle.imageUrl })),
+  ].sort((a, b) => a.offset - b.offset)
 
   function lookTowards(offset: number) {
     setAngleOffset(offset)
@@ -245,8 +272,21 @@ export default function AdminWorldEditor() {
   // its own conversation, so the keys stay out of it until it closes.
   useAngleKeys({
     enabled: storyIndex < 0 && modalMode === null && !storyModalOpen && !angleModalOpen && !isSubmitting,
-    onLookLeft: () => canLookLeft && lookTowards(angleOffset - 1),
-    onLookRight: () => canLookRight && lookTowards(angleOffset + 1),
+    onLookLeft: () => leftOffset !== null && lookTowards(leftOffset),
+    onLookRight: () => rightOffset !== null && lookTowards(rightOffset),
+  })
+
+  // W walks through the view's link, but only once it is on screen — at the end of the
+  // story, as a click on the pin would.
+  useLinkKey({
+    enabled:
+      showLinks &&
+      followLink !== undefined &&
+      modalMode === null &&
+      !storyModalOpen &&
+      !angleModalOpen &&
+      !isSubmitting,
+    onFollowLink: () => followLink && goToScene(followLink.toSceneId),
   })
 
   return (
@@ -303,12 +343,13 @@ export default function AdminWorldEditor() {
           />
 
           {showLinks &&
-            (currentScene.links ?? []).map((link) => {
+            viewLinks.map((link) => {
               const override = link.anglePositions?.[currentViewKey]
               return (
                 <ScenePin
                   key={link.id}
                   link={link}
+                  title={t.admin.editor.followLink.replace('{label}', link.label)}
                   position={{
                     x: override?.positionX ?? link.positionX,
                     y: override?.positionY ?? link.positionY,
@@ -320,11 +361,11 @@ export default function AdminWorldEditor() {
               )
             })}
 
-          {/* Turning left or right stays inside the same scene, so its links come along. */}
-          {storyIndex < 0 && canLookLeft && (
+          {/* Turning left or right stays inside the same scene; each view shows its own link. */}
+          {storyIndex < 0 && leftOffset !== null && (
             <button
               type="button"
-              onClick={() => lookTowards(angleOffset - 1)}
+              onClick={() => lookTowards(leftOffset)}
               title={`${t.admin.angle.lookLeft} (A)`}
               className="absolute left-6 top-1/2 z-20 flex h-14 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
             >
@@ -332,10 +373,10 @@ export default function AdminWorldEditor() {
             </button>
           )}
 
-          {storyIndex < 0 && canLookRight && (
+          {storyIndex < 0 && rightOffset !== null && (
             <button
               type="button"
-              onClick={() => lookTowards(angleOffset + 1)}
+              onClick={() => lookTowards(rightOffset)}
               title={`${t.admin.angle.lookRight} (D)`}
               className="absolute right-6 top-1/2 z-20 flex h-14 w-14 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-black/50 text-white/80 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
             >
@@ -432,19 +473,32 @@ export default function AdminWorldEditor() {
               </button>
             )}
 
-            {/* Links and options belong to the scene as a whole, so they are only
-                offered from the option's own image, not from a turned-away angle. */}
+            {/* Each view holds one link: an empty view offers to create it, a taken one
+                to move it onto another angle. */}
+            {viewLinks.length === 0 ? (
+              <button
+                type="button"
+                onClick={() => setModalMode('create-link')}
+                className="flex items-center gap-2 rounded-full bg-gradient-to-r from-gold to-gold-bright px-4 py-2 font-sans text-caption font-[700] text-abyss shadow-lg transition hover:brightness-105"
+              >
+                <FiPlusCircle className="h-3.5 w-3.5" />
+                {t.admin.editor.createLinkButton}
+              </button>
+            ) : (
+              <LinkMoveMenu
+                links={viewLinks}
+                allLinks={currentScene.links ?? []}
+                views={optionViews}
+                currentOffset={angleOffset}
+                disabled={isSubmitting}
+                onMove={handleLinkMove}
+              />
+            )}
+
+            {/* Options belong to the scene as a whole, so they are only offered from the
+                option's own image, not from a turned-away angle. */}
             {angleOffset === 0 && (
               <>
-                <button
-                  type="button"
-                  onClick={() => setModalMode('create-link')}
-                  className="flex items-center gap-2 rounded-full bg-gradient-to-r from-gold to-gold-bright px-4 py-2 font-sans text-caption font-[700] text-abyss shadow-lg transition hover:brightness-105"
-                >
-                  <FiPlusCircle className="h-3.5 w-3.5" />
-                  {t.admin.editor.createLinkButton}
-                </button>
-
                 <button
                   type="button"
                   onClick={() => setModalMode('create-variant')}
