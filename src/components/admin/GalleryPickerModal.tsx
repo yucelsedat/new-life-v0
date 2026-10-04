@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { FiX } from 'react-icons/fi'
 import { useGalleryImages, type GalleryScope } from '../../hooks/useGalleryImages'
 import { useT } from '../../i18n'
 import HeadingDial from './HeadingDial'
 import MagnetToggle from './MagnetToggle'
+import PickerGrid from './PickerGrid'
+import PickerUpload from './PickerUpload'
+import type { GalleryImage } from '../../types/world'
 
 interface GalleryPickerModalProps {
   open: boolean
@@ -35,9 +38,26 @@ export default function GalleryPickerModal({
   onCancel,
 }: GalleryPickerModalProps) {
   const t = useT()
-  const { images } = useGalleryImages(scope)
+  const { images, refetch } = useGalleryImages(scope)
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null)
   const [name, setName] = useState('')
+
+  // Each picker keeps its own copy of the library, so what was uploaded from another
+  // one — or from the assets page — only shows up here once this one looks again.
+  useEffect(() => {
+    if (open) refetch()
+  }, [open, refetch])
+
+  /** An image uploaded from here is the one being picked — a batch selects its first. */
+  async function handleUploaded(created: GalleryImage[]) {
+    await refetch()
+    setSelectedUrl(created[0].url)
+  }
+
+  async function handleDeleted(deleted: GalleryImage) {
+    await refetch()
+    setSelectedUrl((prev) => (prev === deleted.url ? null : prev))
+  }
   // A new location's first hand starts at 12 and is turned from there.
   const [heading, setHeading] = useState(0)
   const [magnetic, setMagnetic] = useState(false)
@@ -91,35 +111,17 @@ export default function GalleryPickerModal({
               </button>
             </div>
 
+            <PickerUpload scope={scope} onUploaded={handleUploaded} />
+
             <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
               <div className="flex-1 overflow-y-auto px-6 py-5">
-                {available.length === 0 ? (
-                  <p className="font-sans text-caption text-mist">
-                    {images.length === 0 ? t.admin.editor.modal.empty : t.admin.editor.modal.allUsed}
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-                    {available.map((image) => {
-                      const isSelected = selectedUrl === image.url
-                      return (
-                        <button
-                          key={image.id}
-                          type="button"
-                          onClick={() => setSelectedUrl(image.url)}
-                          className={`relative overflow-hidden rounded-xl border-2 transition ${
-                            isSelected ? 'border-gold-bright' : 'border-transparent hover:border-white/20'
-                          }`}
-                        >
-                          <img
-                            src={image.url}
-                            alt={image.originalName}
-                            className="aspect-square w-full object-cover"
-                          />
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
+                <PickerGrid
+                  images={available}
+                  libraryEmpty={images.length === 0}
+                  selectedUrls={selectedUrl ? [selectedUrl] : []}
+                  onPick={(image) => setSelectedUrl(image.url)}
+                  onDeleted={handleDeleted}
+                />
               </div>
 
               {withHeading && (

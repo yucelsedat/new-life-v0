@@ -3,6 +3,9 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { FiX } from 'react-icons/fi'
 import { useGalleryImages, type GalleryScope } from '../../hooks/useGalleryImages'
 import { useT } from '../../i18n'
+import PickerGrid from './PickerGrid'
+import PickerUpload from './PickerUpload'
+import type { GalleryImage } from '../../types/world'
 
 interface StoryPickerModalProps {
   open: boolean
@@ -27,8 +30,25 @@ export default function StoryPickerModal({
   onCancel,
 }: StoryPickerModalProps) {
   const t = useT()
-  const { images } = useGalleryImages(scope)
+  const { images, refetch } = useGalleryImages(scope)
   const [selected, setSelected] = useState<string[]>([])
+
+  // Each picker keeps its own copy of the library, so what was uploaded from another
+  // one — or from the assets page — only shows up here once this one looks again.
+  useEffect(() => {
+    if (open) refetch()
+  }, [open, refetch])
+
+  /** Images uploaded from here join the story, after the frames already chosen. */
+  async function handleUploaded(created: GalleryImage[]) {
+    await refetch()
+    setSelected((prev) => [...prev, ...created.map((image) => image.url).filter((url) => !prev.includes(url))])
+  }
+
+  async function handleDeleted(deleted: GalleryImage) {
+    await refetch()
+    setSelected((prev) => prev.filter((url) => url !== deleted.url))
+  }
 
   // Hide what the rest of the world already uses, but always keep this story's own
   // frames visible so the current order stays editable.
@@ -78,40 +98,17 @@ export default function StoryPickerModal({
               </button>
             </div>
 
+            <PickerUpload scope={scope} onUploaded={handleUploaded} />
+
             <div className="flex-1 overflow-y-auto px-6 py-5">
-              {available.length === 0 ? (
-                <p className="font-sans text-caption text-mist">
-                  {images.length === 0 ? t.admin.editor.modal.empty : t.admin.editor.modal.allUsed}
-                </p>
-              ) : (
-                <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-                  {available.map((image) => {
-                    const order = selected.indexOf(image.url)
-                    const isSelected = order !== -1
-                    return (
-                      <button
-                        key={image.id}
-                        type="button"
-                        onClick={() => toggle(image.url)}
-                        className={`relative overflow-hidden rounded-xl border-2 transition ${
-                          isSelected ? 'border-gold-bright' : 'border-transparent hover:border-white/20'
-                        }`}
-                      >
-                        <img
-                          src={image.url}
-                          alt={image.originalName}
-                          className="aspect-square w-full object-cover"
-                        />
-                        {isSelected && (
-                          <span className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-gold-bright font-mono text-caption font-[700] text-abyss">
-                            {order + 1}
-                          </span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
+              <PickerGrid
+                images={available}
+                libraryEmpty={images.length === 0}
+                selectedUrls={selected}
+                numbered
+                onPick={(image) => toggle(image.url)}
+                onDeleted={handleDeleted}
+              />
             </div>
 
             <div className="flex items-center justify-between gap-3 border-t border-white/10 px-6 py-4">

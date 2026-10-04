@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { FiX } from 'react-icons/fi'
 import { useGalleryImages, type GalleryScope } from '../../hooks/useGalleryImages'
 import { useT } from '../../i18n'
 import HeadingDial from './HeadingDial'
 import MagnetToggle from './MagnetToggle'
+import PickerGrid from './PickerGrid'
+import PickerUpload from './PickerUpload'
+import type { GalleryImage } from '../../types/world'
 import type { RingHand } from '../../utils/heading'
 
 interface AnglePickerModalProps {
@@ -34,8 +37,25 @@ export default function AnglePickerModal({
   onCancel,
 }: AnglePickerModalProps) {
   const t = useT()
-  const { images } = useGalleryImages(scope)
+  const { images, refetch } = useGalleryImages(scope)
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null)
+
+  // Each picker keeps its own copy of the library, so what was uploaded from another
+  // one — or from the assets page — only shows up here once this one looks again.
+  useEffect(() => {
+    if (open) refetch()
+  }, [open, refetch])
+
+  /** An image uploaded from here is the one being picked — a batch selects its first. */
+  async function handleUploaded(created: GalleryImage[]) {
+    await refetch()
+    setSelectedUrl(created[0].url)
+  }
+
+  async function handleDeleted(deleted: GalleryImage) {
+    await refetch()
+    setSelectedUrl((prev) => (prev === deleted.url ? null : prev))
+  }
   /** Null until the hand is pointed somewhere — an angle cannot be added without it. */
   const [heading, setHeading] = useState<number | null>(null)
   const [magnetic, setMagnetic] = useState(false)
@@ -88,35 +108,17 @@ export default function AnglePickerModal({
               </button>
             </div>
 
+            <PickerUpload scope={scope} onUploaded={handleUploaded} />
+
             <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
               <div className="flex-1 overflow-y-auto px-6 py-5">
-                {available.length === 0 ? (
-                  <p className="font-sans text-caption text-mist">
-                    {images.length === 0 ? t.admin.editor.modal.empty : t.admin.editor.modal.allUsed}
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-                    {available.map((image) => {
-                      const isSelected = selectedUrl === image.url
-                      return (
-                        <button
-                          key={image.id}
-                          type="button"
-                          onClick={() => setSelectedUrl(image.url)}
-                          className={`relative overflow-hidden rounded-xl border-2 transition ${
-                            isSelected ? 'border-gold-bright' : 'border-transparent hover:border-white/20'
-                          }`}
-                        >
-                          <img
-                            src={image.url}
-                            alt={image.originalName}
-                            className="aspect-square w-full object-cover"
-                          />
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
+                <PickerGrid
+                  images={available}
+                  libraryEmpty={images.length === 0}
+                  selectedUrls={selectedUrl ? [selectedUrl] : []}
+                  onPick={(image) => setSelectedUrl(image.url)}
+                  onDeleted={handleDeleted}
+                />
               </div>
 
               <aside className="flex shrink-0 flex-col gap-5 overflow-y-auto border-t border-white/10 px-6 py-5 sm:w-64 sm:border-l sm:border-t-0">

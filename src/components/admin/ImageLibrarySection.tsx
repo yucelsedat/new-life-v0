@@ -3,6 +3,7 @@ import { FiCheck, FiClipboard, FiLink, FiTrash2, FiUploadCloud } from 'react-ico
 import { useT } from '../../i18n'
 import { useGalleryImages, type GalleryScope } from '../../hooks/useGalleryImages'
 import { useImagePaste } from '../../hooks/useImagePaste'
+import { useImageUpload } from '../../hooks/useImageUpload'
 import type { GalleryImage } from '../../types/world'
 import { formatFileSize, formatRelativeDate } from '../../utils/helpers'
 import DeleteImagesModal from './DeleteImagesModal'
@@ -72,39 +73,21 @@ export default function ImageLibrarySection({ title, subtitle, emptyLabel, scope
   const t = useT()
   const { images, refetch } = useGalleryImages(scope)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [isUploading, setIsUploading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const { upload, isUploading, uploadFailed } = useImageUpload(scope)
   const [notice, setNotice] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [isConfirmOpen, setIsConfirmOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  const { worldId, kind } = scope
-
   const uploadFiles = useCallback(
     async (files: File[]) => {
       if (files.length === 0) return
-
-      const formData = new FormData()
-      files.forEach((file) => formData.append('images', file))
-      if (worldId) formData.append('worldId', worldId)
-      if (kind) formData.append('kind', kind)
-
-      setIsUploading(true)
-      setError(null)
       setNotice(null)
-      try {
-        const response = await fetch('/api/gallery', { method: 'POST', body: formData })
-        if (!response.ok) throw new Error(`Request failed: ${response.status}`)
-        await refetch()
-      } catch {
-        setError(t.admin.gallery.uploadError)
-      } finally {
-        setIsUploading(false)
-      }
+      const created = await upload(files)
+      if (created.length > 0) await refetch()
     },
-    [worldId, kind, refetch, t],
+    [upload, refetch],
   )
 
   const { zoneRef, isPasteTarget } = useImagePaste<HTMLDivElement>(uploadFiles)
@@ -178,7 +161,7 @@ export default function ImageLibrarySection({ title, subtitle, emptyLabel, scope
         <input ref={fileInputRef} type="file" accept="image/*" multiple onChange={handleFileChange} className="hidden" />
       </div>
 
-      {error && <p className="mb-4 font-sans text-caption text-[#e0798f]">{error}</p>}
+      {uploadFailed && <p className="mb-4 font-sans text-caption text-[#e0798f]">{t.admin.gallery.uploadError}</p>}
       {notice && <p className="mb-4 font-sans text-caption text-gold-bright">{notice}</p>}
 
       <div
