@@ -9,14 +9,10 @@ interface LinkMoveMenuProps {
   /** Every link of the scene, to tell which views are already taken. */
   allLinks: SceneLink[]
   /** The active option's views in turning order, the option image (offset 0) included. */
-  views: { offset: number; imageUrl: string }[]
+  views: { offset: number; imageUrl: string; label: string }[]
   currentOffset: number
   disabled: boolean
   onMove: (linkId: string, offset: number) => void
-}
-
-function offsetLabel(offset: number) {
-  return offset > 0 ? `+${offset}` : String(offset)
 }
 
 /**
@@ -86,7 +82,7 @@ export default function LinkMoveMenu({ links, allLinks, views, currentOffset, di
                     >
                       <img src={view.imageUrl} alt="" className="h-full w-full object-cover" />
                       <span className="absolute inset-x-0 bottom-0 bg-black/70 py-px text-center font-mono text-micro tabular-nums text-white/85">
-                        {view.offset === 0 ? t.admin.angle.baseView : offsetLabel(view.offset)}
+                        {view.label}
                       </span>
                     </button>
                   )

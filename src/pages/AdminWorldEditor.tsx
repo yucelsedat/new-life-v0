@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { LuMagnet } from 'react-icons/lu'
 import { Link, useParams } from 'react-router-dom'
 import {
   FiArrowLeft,
@@ -25,8 +26,9 @@ import OptionTimeField from '../components/admin/OptionTimeField'
 import LinkMoveMenu from '../components/admin/LinkMoveMenu'
 import { clamp } from '../utils/helpers'
 import { formatClock } from '../utils/worldClock'
-import { turnAngle, viewKey } from '../types/world'
-import type { AngleDirection, SceneLink } from '../types/world'
+import { arrivalOffset, headingHour, ringHands, turnAngle } from '../utils/heading'
+import { viewKey } from '../types/world'
+import type { SceneLink } from '../types/world'
 
 type ModalMode = 'first-scene' | 'create-link' | 'create-variant' | 'change-image' | null
 
@@ -102,6 +104,7 @@ export default function AdminWorldEditor() {
     createVariant,
     createAngle,
     deleteAngle,
+    setViewMagnetic,
     saveStory,
     changeViewImage,
     goToScene,
@@ -132,12 +135,32 @@ export default function AdminWorldEditor() {
       .catch(() => setWorldName(null))
   }, [worldId])
 
+  /**
+   * The way the view on screen was looking when its link was followed, kept until the
+   * next location has loaded. Null is a view with no heading on record; undefined means
+   * nobody is on the way anywhere.
+   */
+  const [travelHeading, setTravelHeading] = useState<number | null | undefined>(undefined)
+
+  // Arriving at a location picks the view to open on — as the game does — on its base
+  // option. Adjusted while rendering rather than in an effect, so the location never
+  // shows for a frame at the view left over from the last one.
   const currentSceneId = currentScene?.id
-  useEffect(() => {
+  const [shownSceneId, setShownSceneId] = useState(currentSceneId)
+  if (shownSceneId !== currentSceneId) {
+    setShownSceneId(currentSceneId)
+    setTravelHeading(undefined)
     setActiveOption('base')
-    setAngleOffset(0)
+    setAngleOffset(
+      currentScene && travelHeading !== undefined
+        ? arrivalOffset(
+            travelHeading,
+            ringHands(currentScene.heading, currentScene.angles?.base ?? [], currentScene.magnetic),
+          )
+        : 0,
+    )
     setStoryIndex(-1)
-  }, [currentSceneId])
+  }
 
   async function handleStoryConfirm(imageUrls: string[]) {
     setIsSubmitting(true)
@@ -151,12 +174,12 @@ export default function AdminWorldEditor() {
     }
   }
 
-  async function handleAngleConfirm(direction: AngleDirection, imageUrl: string) {
+  async function handleAngleConfirm(imageUrl: string, heading: number, magnetic: boolean) {
     setIsSubmitting(true)
     try {
-      await createAngle(activeOption, angleOffset, direction, imageUrl)
+      const angle = await createAngle(activeOption, imageUrl, heading, magnetic)
       // Land on the angle that was just created, so it can be furnished right away.
-      setAngleOffset((prev) => prev + (direction === 'right' ? 1 : -1))
+      if (angle) setAngleOffset(angle.offset)
       setStoryIndex(-1)
       await refetchUsed()
     } finally {
@@ -171,7 +194,7 @@ export default function AdminWorldEditor() {
     setIsSubmitting(true)
     try {
       await deleteAngle(activeOption, angle.id)
-      setAngleOffset(angleOffset - Math.sign(angleOffset))
+      setAngleOffset(0)
       setStoryIndex(-1)
       await refetchUsed()
     } finally {
@@ -190,13 +213,13 @@ export default function AdminWorldEditor() {
     }
   }
 
-  async function handleModalConfirm(name: string, imageUrl: string) {
+  async function handleModalConfirm(name: string, imageUrl: string, heading: number, magnetic: boolean) {
     setIsSubmitting(true)
     try {
       if (modalMode === 'first-scene') {
-        await createFirstScene(name, imageUrl)
+        await createFirstScene(name, imageUrl, heading, magnetic)
       } else if (modalMode === 'create-link') {
-        await createLink(name, imageUrl, angleOffset)
+        await createLink(name, imageUrl, angleOffset, heading, magnetic)
       } else if (modalMode === 'create-variant') {
         await createVariant(imageUrl)
       } else if (modalMode === 'change-image') {
@@ -230,20 +253,17 @@ export default function AdminWorldEditor() {
   const activeOptionImage = activeOptionEntry?.imageUrl ?? currentScene?.imageUrl
   const activeOptionIndex = activeOptionEntry?.optionIndex ?? 0
 
-  // Angles are a chain hanging off the active option; offset 0 is the option image itself.
+  // The active option's ring, as the canvas draws it: its own image (offset 0) and its
+  // angles, each a hand pointing the way it looks. Turning goes from hand to hand.
   const optionAngles = currentScene?.angles?.[activeOption] ?? []
   const activeAngle = optionAngles.find((angle) => angle.offset === angleOffset)
   const viewImage = angleOffset === 0 ? activeOptionImage : activeAngle?.imageUrl
-  const hasAngleAt = (offset: number) =>
-    offset === 0 || optionAngles.some((angle) => angle.offset === offset)
-  const leftOffset = turnAngle(angleOffset, optionAngles, 'left')
-  const rightOffset = turnAngle(angleOffset, optionAngles, 'right')
-  // Turning wraps round the circle, but a new angle can only be hung off the open end of
-  // the chain — a side that already has a neighbouring offset is taken.
-  const takenDirections: AngleDirection[] = [
-    ...(hasAngleAt(angleOffset - 1) ? (['left'] as const) : []),
-    ...(hasAngleAt(angleOffset + 1) ? (['right'] as const) : []),
-  ]
+  const sceneHeading = currentScene?.heading ?? 0
+  const optionHands = ringHands(sceneHeading, optionAngles, currentScene?.magnetic)
+  const activeHand = optionHands.find((hand) => hand.offset === angleOffset)
+  const leftOffset = turnAngle(angleOffset, sceneHeading, optionAngles, 'left')
+  const rightOffset = turnAngle(angleOffset, sceneHeading, optionAngles, 'right')
+  const hourLabel = (heading: number) => t.admin.heading.hour.replace('{n}', String(headingHour(heading)))
 
   const currentViewKey = viewKey(activeOption, angleOffset)
   const storyFrames = currentScene?.stories?.[currentViewKey] ?? []
@@ -257,15 +277,29 @@ export default function AdminWorldEditor() {
   // scene from before that rule can still have several on its option image.
   const viewLinks = (currentScene?.links ?? []).filter((link) => link.angleOffset === angleOffset)
   const followLink = viewLinks[0]
-  // The option image and its angles in turning order — where a link can be moved to.
-  const optionViews = [
-    ...(activeOptionImage ? [{ offset: 0, imageUrl: activeOptionImage }] : []),
-    ...optionAngles.map((angle) => ({ offset: angle.offset, imageUrl: angle.imageUrl })),
-  ].sort((a, b) => a.offset - b.offset)
+  // The option image and its angles in turning order, clockwise round the ring — where
+  // a link can be moved to. Each is named by the hour its hand points at.
+  const optionViews = [...optionHands]
+    .sort((a, b) => a.heading - b.heading)
+    .flatMap((hand) => {
+      const imageUrl =
+        hand.offset === 0
+          ? activeOptionImage
+          : optionAngles.find((angle) => angle.offset === hand.offset)?.imageUrl
+      if (!imageUrl) return []
+      const label = hand.isSet ? hourLabel(hand.heading) : '?'
+      return [{ offset: hand.offset, imageUrl, label }]
+    })
 
   function lookTowards(offset: number) {
     setAngleOffset(offset)
     setStoryIndex(-1)
+  }
+
+  /** Walk through a link, taking along the way this view looks so the next location can answer it. */
+  function followLinkTo(sceneId: string) {
+    setTravelHeading(activeHand?.isSet ? activeHand.heading : null)
+    goToScene(sceneId)
   }
 
   // A and D turn the camera as the on-screen arrows do. A picker on top of the scene is
@@ -286,7 +320,7 @@ export default function AdminWorldEditor() {
       !storyModalOpen &&
       !angleModalOpen &&
       !isSubmitting,
-    onFollowLink: () => followLink && goToScene(followLink.toSceneId),
+    onFollowLink: () => followLink && followLinkTo(followLink.toSceneId),
   })
 
   return (
@@ -356,7 +390,7 @@ export default function AdminWorldEditor() {
                   }}
                   containerRef={backgroundRef}
                   onDragEnd={(linkId, x, y) => updateLinkPosition(linkId, activeOption, angleOffset, x, y)}
-                  onNavigate={goToScene}
+                  onNavigate={followLinkTo}
                 />
               )
             })}
@@ -435,12 +469,14 @@ export default function AdminWorldEditor() {
             )}
           </div>
 
-          {angleOffset !== 0 && (
-            <span className="absolute left-1/2 bottom-8 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/15 bg-black/60 px-3 py-1.5 font-mono text-micro text-white/80 backdrop-blur-md">
-              <FiCompass className="h-3.5 w-3.5 text-gold-bright" />
-              {t.admin.angle.counter.replace('{i}', angleOffset > 0 ? `+${angleOffset}` : String(angleOffset))}
+          {/* Every view is an angle with an hour of its own; gold marks a magnetic one. */}
+          <span className="absolute left-1/2 bottom-8 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/15 bg-black/60 px-3 py-1.5 font-mono text-micro text-white/80 backdrop-blur-md">
+            <FiCompass className={`h-3.5 w-3.5 ${activeHand?.magnetic ? 'text-gold-bright' : 'text-white/60'}`} />
+            {t.admin.heading.angleHand}
+            <span className="text-white/50">
+              {activeHand?.isSet ? hourLabel(activeHand.heading) : t.admin.heading.notPicked}
             </span>
-          )}
+          </span>
 
           {canAdvance && (
             <button
@@ -494,6 +530,30 @@ export default function AdminWorldEditor() {
                 onMove={handleLinkMove}
               />
             )}
+
+            {/* Decides where someone walking in from another location ends up looking. A
+                view with no heading on record has nowhere on the ring to pull towards. */}
+            <button
+              type="button"
+              role="switch"
+              aria-checked={activeHand?.magnetic ?? false}
+              disabled={!activeHand?.isSet}
+              title={activeHand?.isSet ? t.admin.magnet.hint : t.admin.magnet.needsHeading}
+              onClick={() => setViewMagnetic(activeOption, angleOffset, !activeHand?.magnetic)}
+              className={`flex items-center gap-2 rounded-full border bg-black/50 px-4 py-2 font-sans text-caption font-[700] backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright disabled:opacity-40 disabled:hover:border-white/15 disabled:hover:text-white/80 ${
+                activeHand?.magnetic ? 'border-gold-bright text-gold-bright' : 'border-white/15 text-white/80'
+              }`}
+            >
+              <LuMagnet className="h-3.5 w-3.5" />
+              {t.admin.magnet.label}
+              <span
+                className={`rounded-full px-2 py-0.5 font-mono text-micro ${
+                  activeHand?.magnetic ? 'bg-gold-bright text-abyss' : 'bg-white/10 text-white/60'
+                }`}
+              >
+                {activeHand?.magnetic ? t.admin.magnet.on : t.admin.magnet.off}
+              </span>
+            </button>
 
             {/* Options belong to the scene as a whole, so they are only offered from the
                 option's own image, not from a turned-away angle. */}
@@ -563,7 +623,7 @@ export default function AdminWorldEditor() {
         isSubmitting={isSubmitting}
         scope={{ worldId, kind: 'scene' }}
         hiddenUrls={usedUrls}
-        takenDirections={takenDirections}
+        hands={optionHands}
         onConfirm={handleAngleConfirm}
         onCancel={() => setAngleModalOpen(false)}
       />
@@ -589,6 +649,8 @@ export default function AdminWorldEditor() {
               : t.admin.editor.modal.linkNameLabel
         }
         hiddenUrls={usedUrls}
+        // Both of these make a new scene, and a scene's image needs its direction.
+        withHeading={modalMode === 'first-scene' || modalMode === 'create-link'}
         isSubmitting={isSubmitting}
         onConfirm={handleModalConfirm}
         onCancel={() => setModalMode(null)}

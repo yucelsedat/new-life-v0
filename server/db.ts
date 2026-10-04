@@ -79,9 +79,10 @@ db.exec(`
   );
 
   -- A different viewing direction of one option of a scene — still the same scene,
-  -- so it can hold one of that scene's links. angle_offset is signed and relative to the
-  -- option's own image: 0 is the option image itself (never stored here),
-  -- +1/+2… are successive turns to the right, -1/-2… to the left.
+  -- so it can hold one of that scene's links. angle_offset is the slot stories and links
+  -- hang off: 0 is the option image itself (never stored here), and one slot is the same
+  -- view in every option. Which way the angle looks, and so where it comes round when
+  -- turning, is its heading — the number of the slot says nothing about direction.
   CREATE TABLE IF NOT EXISTS scene_angles (
     id TEXT PRIMARY KEY,
     scene_id TEXT NOT NULL,
@@ -171,6 +172,32 @@ try {
   db.exec(`ALTER TABLE scene_links ADD COLUMN angle_offset INTEGER NOT NULL DEFAULT 0`)
 } catch {
   // column already exists
+}
+
+// Every image of a scene gained a heading: the direction it looks in, in degrees
+// clockwise from 12 o'clock, drawn as a hand on the scene's angle ring. A scene's own
+// image is its front and starts at 12. Angles written before this have no heading —
+// which way they face was never recorded, so it stays unset until the author sets it.
+try {
+  db.exec(`ALTER TABLE scenes ADD COLUMN heading INTEGER NOT NULL DEFAULT 0`)
+} catch {
+  // column already exists
+}
+try {
+  db.exec(`ALTER TABLE scene_angles ADD COLUMN heading INTEGER`)
+} catch {
+  // column already exists
+}
+
+// A view can be magnetic: someone arriving from another location is pulled to the
+// magnetic view nearest the way they were facing, ahead of a plain view that faces
+// exactly that way. Both the scene's own image and its angles can be.
+for (const table of ['scenes', 'scene_angles']) {
+  try {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN magnetic INTEGER NOT NULL DEFAULT 0`)
+  } catch {
+    // column already exists
+  }
 }
 
 for (const column of ['canvas_x', 'canvas_y']) {

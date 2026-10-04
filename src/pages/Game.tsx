@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { FiArrowLeft, FiArrowRight, FiClock } from 'react-icons/fi'
 import { useWorldEditor } from '../hooks/useWorldEditor'
@@ -7,7 +7,8 @@ import { useAngleKeys } from '../hooks/useAngleKeys'
 import { useLinkKey } from '../hooks/useLinkKey'
 import { useWorldOptionTimes } from '../hooks/useWorldOptionTimes'
 import { activeOptionIndex, formatClock, minuteOfDayFor } from '../utils/worldClock'
-import { turnAngle, viewKey } from '../types/world'
+import { arrivalOffset, ringHands, turnAngle } from '../utils/heading'
+import { viewKey } from '../types/world'
 import type { SceneLink } from '../types/world'
 
 function ScenePinButton({
@@ -71,20 +72,36 @@ export default function Game() {
     return reached[reached.length - 1] ?? options[0]
   }, [currentScene, worldOptionIndex])
 
-  // Walking into a scene, and the world moving on under your feet, both land you on a
-  // fresh view — the story starts over and the camera faces forward again.
-  const activeOptionKey = activeOption?.key
-  useEffect(() => {
-    setStoryIndex(-1)
-    setAngleOffset(0)
-  }, [currentSceneId, activeOptionKey])
-
   // Turning left or right stays inside the scene; each view shows the exit it holds.
   const optionAngles = activeOption ? (currentScene?.angles?.[activeOption.key] ?? []) : []
+  const optionHands = ringHands(currentScene?.heading ?? 0, optionAngles, currentScene?.magnetic)
+  const activeHand = optionHands.find((hand) => hand.offset === angleOffset)
+
+  /**
+   * The way the player was looking when they walked through a link, kept until the next
+   * location has loaded. Null is a view with no heading on record; undefined means
+   * nobody is on the way anywhere.
+   */
+  const [travelHeading, setTravelHeading] = useState<number | null | undefined>(undefined)
+
+  // Walking into a location lands you on the view that answers the way you came in
+  // looking; the world moving on under your feet faces the camera forward again. Either
+  // way the story starts over. Adjusted while rendering rather than in an effect, so the
+  // new location never shows for a frame at the view left over from the last one.
+  const activeOptionKey = activeOption?.key
+  const [shown, setShown] = useState({ sceneId: currentSceneId, optionKey: activeOptionKey })
+  if (shown.sceneId !== currentSceneId || shown.optionKey !== activeOptionKey) {
+    const arrived = shown.sceneId !== currentSceneId
+    setShown({ sceneId: currentSceneId, optionKey: activeOptionKey })
+    setStoryIndex(-1)
+    setAngleOffset(arrived && travelHeading !== undefined ? arrivalOffset(travelHeading, optionHands) : 0)
+    if (arrived) setTravelHeading(undefined)
+  }
+
   const activeAngle = optionAngles.find((angle) => angle.offset === angleOffset)
   const viewImageUrl = angleOffset === 0 ? (activeOption?.imageUrl ?? null) : (activeAngle?.imageUrl ?? null)
-  const leftOffset = turnAngle(angleOffset, optionAngles, 'left')
-  const rightOffset = turnAngle(angleOffset, optionAngles, 'right')
+  const leftOffset = turnAngle(angleOffset, currentScene?.heading ?? 0, optionAngles, 'left')
+  const rightOffset = turnAngle(angleOffset, currentScene?.heading ?? 0, optionAngles, 'right')
 
   const currentViewKey = activeOption ? viewKey(activeOption.key, angleOffset) : null
   const storyFrames = currentViewKey ? (currentScene?.stories?.[currentViewKey] ?? []) : []
@@ -101,6 +118,12 @@ export default function Game() {
     setStoryIndex(-1)
   }
 
+  /** Walk through a link, taking along the way this view looks so the next location can answer it. */
+  function followLinkTo(sceneId: string) {
+    setTravelHeading(activeHand?.isSet ? activeHand.heading : null)
+    goToScene(sceneId)
+  }
+
   // A and D do what the on-screen arrows do, and are just as limited by whether the
   // option has any angle to turn to.
   useAngleKeys({
@@ -113,7 +136,7 @@ export default function Game() {
   // pin is showing.
   useLinkKey({
     enabled: showLinks && followLink !== undefined,
-    onFollowLink: () => followLink && goToScene(followLink.toSceneId),
+    onFollowLink: () => followLink && followLinkTo(followLink.toSceneId),
   })
 
   return (
@@ -161,7 +184,7 @@ export default function Game() {
                     x: override?.positionX ?? link.positionX,
                     y: override?.positionY ?? link.positionY,
                   }}
-                  onNavigate={goToScene}
+                  onNavigate={followLinkTo}
                 />
               )
             })}

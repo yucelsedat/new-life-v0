@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,15 +11,25 @@ import {
 import { Link, useParams } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import { FiArrowLeft, FiImage, FiLink, FiMinus, FiPlus, FiX } from 'react-icons/fi'
+import { LuMagnet } from 'react-icons/lu'
 import { useT } from '../i18n'
 import { useWorldCanvas } from '../hooks/useWorldCanvas'
 import { useUsedImages } from '../hooks/useUsedImages'
 import GalleryPickerModal from '../components/admin/GalleryPickerModal'
+import { DialFace, DialHand } from '../components/admin/HeadingDial'
 import { clamp } from '../utils/helpers'
+import { headingHour, headingTowards, headingVector, ringHands, type RingHand } from '../utils/heading'
 import type { SceneLink, WorldScene } from '../types/world'
 
-const NODE_W = 180
-const NODE_H = 130
+/** Radius of a scene's angle ring, in canvas units. */
+const RING_R = 68
+const HAND_LENGTH = RING_R - 14
+/** Width of the image a hand shows on hover, in screen pixels — it does not shrink with the zoom. */
+const PREVIEW_W = 360
+/** How close to the edge of the window that image may come, in screen pixels. */
+const PREVIEW_MARGIN = 12
+/** The clear space kept between a ring's rim and the image, in screen pixels. */
+const PREVIEW_GAP = 12
 const MIN_ZOOM = 0.3
 const MAX_ZOOM = 2
 
@@ -33,11 +44,57 @@ function fallbackPosition(index: number): Vec2 {
   return { x: 140 + col * 260, y: 140 + row * 220 }
 }
 
+/**
+ * Where the centre of a `width` × `height` box sits, relative to a ring's centre, when it
+ * lies along `heading` and the box just clears a circle of `radius` — the image at the
+ * tip of a hand, touching the ring but never over it, whichever way the hand points.
+ */
+function besideRing(heading: number, width: number, height: number, radius: number): Vec2 {
+  const { x, y } = headingVector(heading)
+  // How far the box stands from the ring's centre with its own centre `distance` out.
+  const reach = (distance: number) =>
+    Math.hypot(
+      Math.max(Math.abs(x * distance) - width / 2, 0),
+      Math.max(Math.abs(y * distance) - height / 2, 0),
+    )
+
+  // Far enough out to clear the circle whatever the heading; then close in on the rim.
+  let near = 0
+  let far = radius + Math.hypot(width, height) / 2
+  for (let pass = 0; pass < 24; pass++) {
+    const middle = (near + far) / 2
+    if (reach(middle) < radius) near = middle
+    else far = middle
+  }
+  return { x: x * far, y: y * far }
+}
+
+/** How far a box overruns the window, margins included. Zero when it fits. */
+function overrun(left: number, top: number, width: number, height: number): number {
+  return (
+    Math.max(PREVIEW_MARGIN - left, 0) +
+    Math.max(left + width - (window.innerWidth - PREVIEW_MARGIN), 0) +
+    Math.max(PREVIEW_MARGIN - top, 0) +
+    Math.max(top + height - (window.innerHeight - PREVIEW_MARGIN), 0)
+  )
+}
+
 interface PositionedScene extends WorldScene {
   px: number
   py: number
 }
 
+/** A ring hand together with the image it stands for. `angleId` null is the scene's own image. */
+interface SceneHand extends RingHand {
+  angleId: string | null
+  imageUrl: string
+}
+
+/**
+ * A scene on the canvas: a clock-like ring with one hand per image the scene can be seen
+ * from — its own, and each angle of its base option. A hand points the way that image
+ * looks; hovering it shows the image at its tip, dragging it turns it.
+ */
 function CanvasNode({
   scene,
   zoom,
@@ -46,6 +103,8 @@ function CanvasNode({
   onDragEnd,
   onStartConnect,
   onCompleteConnect,
+  onHeadingChange,
+  onMagneticChange,
 }: {
   scene: PositionedScene
   zoom: number
@@ -54,12 +113,90 @@ function CanvasNode({
   onDragEnd: (sceneId: string, x: number, y: number) => void
   onStartConnect: (sceneId: string) => void
   onCompleteConnect: (sceneId: string) => void
+  onHeadingChange: (sceneId: string, angleId: string | null, heading: number) => void
+  onMagneticChange: (sceneId: string, angleId: string | null, magnetic: boolean) => void
 }) {
+  const t = useT()
   const draggingRef = useRef(false)
   const movedRef = useRef(false)
   const startRef = useRef({ px: 0, py: 0, wx: 0, wy: 0 })
   const [dragPos, setDragPos] = useState<Vec2 | null>(null)
   const pos = dragPos ?? { x: scene.px, y: scene.py }
+
+  const ringRef = useRef<SVGSVGElement>(null)
+  /** Offset of the hand being turned, while the pointer is down on it. */
+  const turningRef = useRef<number | null>(null)
+  const [turn, setTurn] = useState<{ offset: number; heading: number } | null>(null)
+  const [hoveredOffset, setHoveredOffset] = useState<number | null>(null)
+
+  // The canvas has no option on screen, so the ring is the scene as it opens: the base option.
+  const baseAngles = scene.angles?.base ?? []
+  const hands: SceneHand[] = ringHands(scene.heading, baseAngles, scene.magnetic).map((hand) => {
+    const angle = baseAngles.find((item) => item.offset === hand.offset)
+    return {
+      ...hand,
+      heading: turn?.offset === hand.offset ? turn.heading : hand.heading,
+      angleId: angle?.id ?? null,
+      imageUrl: angle?.imageUrl ?? scene.imageUrl,
+    }
+  })
+  const activeOffset = turn?.offset ?? hoveredOffset
+  const activeHand = hands.find((hand) => hand.offset === activeOffset)
+
+  const previewRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * Puts the hovered image at the tip of its hand, outside the ring. Next to an edge of
+   * the window there may be no room there; the image then slides round the ring to the
+   * nearest side that has some, and never back over the ring itself. Worked out in
+   * screen pixels, which is what the preview is laid out in — it is scaled back against
+   * the zoom.
+   */
+  function placePreview() {
+    const preview = previewRef.current
+    const ring = ringRef.current?.getBoundingClientRect()
+    if (!preview || !ring || !activeHand) return
+
+    const width = preview.offsetWidth
+    const height = preview.offsetHeight
+    const centre = { x: ring.left + ring.width / 2, y: ring.top + ring.height / 2 }
+    const radius = ring.width / 2 + PREVIEW_GAP
+
+    // Swinging further from the hand each time: 0°, ±15°, ±30° … round to the far side.
+    const swings = [0]
+    for (let swing = 15; swing < 180; swing += 15) swings.push(swing, -swing)
+    swings.push(180)
+
+    let best = besideRing(activeHand.heading, width, height, radius)
+    let leastOverrun = Infinity
+    for (const swing of swings) {
+      const spot = besideRing(activeHand.heading + swing, width, height, radius)
+      const over = overrun(centre.x + spot.x - width / 2, centre.y + spot.y - height / 2, width, height)
+      if (over < leastOverrun) {
+        best = spot
+        leastOverrun = over
+      }
+      if (over === 0) break
+    }
+    preview.style.translate = `${best.x - width / 2}px ${best.y - height / 2}px`
+  }
+
+  // Every render: panning, zooming, dragging the ring and turning the hand all move it.
+  useLayoutEffect(placePreview)
+
+  /**
+   * The marks a hand cannot be turned onto. The scene's own image fronts every option,
+   * so it keeps clear of all their angles; an angle only of the hands on its own ring.
+   */
+  function takenHeadings(hand: SceneHand): Set<number> {
+    if (hand.angleId === null) {
+      const everyAngle = Object.values(scene.angles ?? {}).flat()
+      return new Set(everyAngle.flatMap((angle) => (angle.heading === null ? [] : [angle.heading])))
+    }
+    return new Set(
+      hands.filter((other) => other.offset !== hand.offset && other.isSet).map((other) => other.heading),
+    )
+  }
 
   function handlePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     event.stopPropagation()
@@ -92,25 +229,111 @@ function CanvasNode({
     if (connecting && !isConnectSource) onCompleteConnect(scene.id)
   }
 
+  function handleHandPointerDown(event: ReactPointerEvent<SVGGElement>, hand: SceneHand) {
+    // While connecting, the whole ring is a click target for the scene.
+    if (connecting) return
+    // Grabbing a hand turns it; it must not drag the ring along.
+    event.stopPropagation()
+    turningRef.current = hand.offset
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function handleHandPointerMove(event: ReactPointerEvent<SVGGElement>, hand: SceneHand) {
+    if (turningRef.current !== hand.offset) return
+    const rect = ringRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const heading = headingTowards(
+      event.clientX - (rect.left + rect.width / 2),
+      event.clientY - (rect.top + rect.height / 2),
+    )
+    // A taken mark is skipped rather than refused: the hand waits on its last free one.
+    if (!takenHeadings(hand).has(heading)) setTurn({ offset: hand.offset, heading })
+  }
+
+  function handleHandPointerUp(hand: SceneHand) {
+    if (turningRef.current !== hand.offset) return
+    turningRef.current = null
+    if (turn) {
+      const stored = hand.angleId === null ? scene.heading : baseAngles.find((a) => a.id === hand.angleId)?.heading
+      // Letting go of a guessed hand where it already stands still settles it there.
+      if (turn.heading !== stored) onHeadingChange(scene.id, hand.angleId, turn.heading)
+    }
+    setTurn(null)
+  }
+
+  const ringStroke = isConnectSource ? 'var(--color-gold-bright)' : 'rgba(255,255,255,0.22)'
+
   return (
     <div
-      style={{ left: pos.x, top: pos.y, width: NODE_W, height: NODE_H }}
+      style={{ left: pos.x, top: pos.y, width: RING_R * 2, height: RING_R * 2, zIndex: activeHand ? 30 : undefined }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onClick={handleClick}
-      className={`absolute -translate-x-1/2 -translate-y-1/2 cursor-grab overflow-hidden rounded-xl border-2 bg-black/40 shadow-lg transition-colors active:cursor-grabbing ${
-        isConnectSource
-          ? 'border-gold-bright'
-          : connecting
-            ? 'border-white/30 hover:border-gold-bright'
-            : 'border-white/15'
+      className={`group absolute -translate-x-1/2 -translate-y-1/2 cursor-grab rounded-full active:cursor-grabbing ${
+        connecting && !isConnectSource ? 'cursor-pointer' : ''
       }`}
     >
-      <img src={scene.imageUrl} alt={scene.name} className="h-full w-full object-cover" draggable={false} />
-      <div className="absolute inset-x-0 bottom-0 bg-black/75 px-2.5 py-1.5">
-        <span className="block truncate font-sans text-caption font-[700] text-white/90">{scene.name}</span>
-      </div>
+      <svg
+        ref={ringRef}
+        viewBox={`${-RING_R} ${-RING_R} ${RING_R * 2} ${RING_R * 2}`}
+        className="h-full w-full touch-none select-none overflow-visible"
+      >
+        {/* Filled, so the link lines running to the centre stop at the rim. */}
+        <circle
+          r={RING_R - 1}
+          fill="var(--color-abyss)"
+          stroke={ringStroke}
+          strokeWidth={2}
+          className={connecting && !isConnectSource ? 'transition group-hover:stroke-gold-bright' : 'transition'}
+        />
+        <DialFace radius={RING_R - 5} />
+
+        {/* The hand under the cursor is drawn last, on top of any it crosses. */}
+        {[...hands]
+          .sort((a, b) => Number(a.offset === activeOffset) - Number(b.offset === activeOffset))
+          .map((hand) => {
+            const { x, y } = headingVector(hand.heading)
+            return (
+              <g
+                key={hand.offset}
+                className={connecting ? undefined : 'cursor-grab active:cursor-grabbing'}
+                onPointerEnter={() => setHoveredOffset(hand.offset)}
+                onPointerLeave={() => setHoveredOffset((prev) => (prev === hand.offset ? null : prev))}
+                onPointerDown={(event) => handleHandPointerDown(event, hand)}
+                onPointerMove={(event) => handleHandPointerMove(event, hand)}
+                onPointerUp={() => handleHandPointerUp(hand)}
+                // A hand with no heading on record has nowhere on the ring to pull towards.
+                onDoubleClick={() =>
+                  !connecting && hand.isSet && onMagneticChange(scene.id, hand.angleId, !hand.magnetic)
+                }
+              >
+                <DialHand
+                  heading={hand.heading}
+                  length={HAND_LENGTH}
+                  dashed={!hand.isSet}
+                  magnetic={hand.magnetic}
+                  active={hand.offset === activeOffset}
+                />
+                {/* A generous hit area, kept off the hub where every hand meets. */}
+                <line
+                  x1={x * 12}
+                  y1={y * 12}
+                  x2={x * (HAND_LENGTH + 8)}
+                  y2={y * (HAND_LENGTH + 8)}
+                  stroke="transparent"
+                  strokeWidth={16}
+                  strokeLinecap="round"
+                />
+              </g>
+            )
+          })}
+        <circle r={4} fill="#f2f0e8" className="pointer-events-none" />
+      </svg>
+
+      <span className="pointer-events-none absolute left-1/2 top-full mt-2 max-w-[200px] -translate-x-1/2 truncate rounded-full border border-white/10 bg-black/70 px-3 py-1 font-sans text-caption font-[700] text-white/90">
+        {scene.name}
+      </span>
 
       <button
         type="button"
@@ -119,12 +342,62 @@ function CanvasNode({
           event.stopPropagation()
           onStartConnect(scene.id)
         }}
-        className={`absolute top-1.5 right-1.5 flex h-6 w-6 items-center justify-center rounded-full transition ${
+        className={`absolute right-0 top-0 flex h-6 w-6 items-center justify-center rounded-full transition ${
           isConnectSource ? 'bg-gold-bright text-abyss' : 'bg-black/60 text-white/70 hover:text-gold-bright'
         }`}
       >
         <FiLink className="h-3 w-3" />
       </button>
+
+      {activeHand && (
+        // Laid out from the ring's centre and scaled back against the zoom, so the image
+        // is as large on a zoomed-out canvas as on a close one. placePreview moves it out
+        // past the rim.
+        <div
+          className="pointer-events-none absolute"
+          style={{ left: RING_R, top: RING_R, transform: `scale(${1 / zoom})`, transformOrigin: '0 0' }}
+        >
+          <div ref={previewRef} className="absolute left-0 top-0" style={{ width: PREVIEW_W }}>
+            <motion.div
+              key={activeHand.offset}
+              initial={{ opacity: 0, scale: 0.94 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
+              className={`overflow-hidden rounded-2xl border-2 bg-abyss shadow-[0_24px_60px_rgba(0,0,0,0.65)] ${
+                activeHand.magnetic ? 'border-gold-bright' : 'border-white/40'
+              }`}
+            >
+              <img
+                src={activeHand.imageUrl}
+                alt={scene.name}
+                className="block w-full"
+                draggable={false}
+                // The box only gets its height once the image has arrived.
+                onLoad={placePreview}
+              />
+              <div className="flex items-baseline justify-between gap-3 px-3.5 py-2">
+                <span className="flex min-w-0 items-center gap-2 font-sans text-caption font-[700] text-white/90">
+                  <span className="truncate">{t.admin.heading.angleHand}</span>
+                  {activeHand.magnetic && (
+                    <span className="flex shrink-0 items-center gap-1 rounded-full bg-gold-bright px-2 py-0.5 font-mono text-micro font-[400] text-abyss">
+                      <LuMagnet className="h-3 w-3" />
+                      {t.admin.magnet.badge}
+                    </span>
+                  )}
+                </span>
+                <span className="shrink-0 font-mono text-micro text-gold-bright">
+                  {activeHand.isSet || turn
+                    ? t.admin.heading.hour.replace('{n}', String(headingHour(activeHand.heading)))
+                    : t.admin.heading.unset}
+                </span>
+              </div>
+              <p className="border-t border-white/10 px-3.5 py-1.5 font-sans text-micro text-mist">
+                {t.admin.magnet.canvasHint}
+              </p>
+            </motion.div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -213,7 +486,8 @@ function ConnectModal({ open, isSubmitting, onConfirm, onCancel }: ConnectModalP
 export default function AdminWorldCanvas() {
   const t = useT()
   const { worldId } = useParams<{ worldId: string }>()
-  const { scenes, links, isLoading, createScene, connectScenes, updateScenePosition } = useWorldCanvas(worldId ?? '')
+  const { scenes, links, isLoading, createScene, connectScenes, updateScenePosition, updateHeading, updateMagnetic } =
+    useWorldCanvas(worldId ?? '')
   const { usedUrls, refetchUsed } = useUsedImages(worldId ?? '')
 
   const containerRef = useRef<HTMLDivElement>(null)
@@ -323,13 +597,13 @@ export default function AdminWorldCanvas() {
     }
   }
 
-  async function handleAddScene(name: string, imageUrl: string) {
+  async function handleAddScene(name: string, imageUrl: string, heading: number, magnetic: boolean) {
     setIsSubmitting(true)
     try {
       const rect = containerRef.current?.getBoundingClientRect()
       const cx = rect ? (rect.width / 2 - pan.x) / zoom : 200
       const cy = rect ? (rect.height / 2 - pan.y) / zoom : 200
-      await createScene(name, imageUrl, cx, cy)
+      await createScene(name, imageUrl, cx, cy, heading, magnetic)
       await refetchUsed()
     } finally {
       setIsSubmitting(false)
@@ -423,6 +697,8 @@ export default function AdminWorldCanvas() {
               onDragEnd={updateScenePosition}
               onStartConnect={handleStartConnect}
               onCompleteConnect={handleCompleteConnect}
+              onHeadingChange={updateHeading}
+              onMagneticChange={updateMagnetic}
             />
           ))}
         </div>
@@ -466,6 +742,7 @@ export default function AdminWorldCanvas() {
         scope={{ worldId, kind: 'scene' }}
         hiddenUrls={usedUrls}
         open={addSceneOpen}
+        withHeading
         nameLabel={t.admin.editor.modal.sceneNameLabel}
         isSubmitting={isSubmitting}
         onConfirm={handleAddScene}

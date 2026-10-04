@@ -1,21 +1,29 @@
 import { useCallback, useEffect, useState } from 'react'
 import { viewKey } from '../types/world'
-import type { AngleDirection, SceneAngle, SceneLink, SceneVariant, StoryFrame, WorldScene } from '../types/world'
+import type { SceneAngle, SceneLink, SceneVariant, StoryFrame, WorldScene } from '../types/world'
 
 export interface UseWorldEditorResult {
   scenes: WorldScene[]
   currentScene: WorldScene | null
   isLoading: boolean
   error: string | null
-  createFirstScene: (name: string, imageUrl: string) => Promise<void>
-  createLink: (label: string, imageUrl: string, angleOffset: number) => Promise<void>
+  createFirstScene: (name: string, imageUrl: string, heading: number, magnetic: boolean) => Promise<void>
+  createLink: (
+    label: string,
+    imageUrl: string,
+    angleOffset: number,
+    heading: number,
+    magnetic: boolean,
+  ) => Promise<void>
   createVariant: (imageUrl: string) => Promise<void>
   createAngle: (
     optionKey: string,
-    fromOffset: number,
-    direction: AngleDirection,
     imageUrl: string,
-  ) => Promise<void>
+    heading: number,
+    magnetic: boolean,
+  ) => Promise<SceneAngle | null>
+  /** Make the view on screen — an option image or one of its angles — magnetic, or plain again. */
+  setViewMagnetic: (optionKey: string, angleOffset: number, magnetic: boolean) => void
   deleteAngle: (optionKey: string, angleId: string) => Promise<void>
   saveStory: (optionKey: string, angleOffset: number, imageUrls: string[]) => Promise<void>
   changeViewImage: (optionKey: string, angleOffset: number, imageUrl: string) => Promise<void>
@@ -74,13 +82,13 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
   }, [worldId])
 
   const createFirstScene = useCallback(
-    async (name: string, imageUrl: string) => {
+    async (name: string, imageUrl: string, heading: number, magnetic: boolean) => {
       setError(null)
       try {
         const response = await fetch('/api/scenes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ worldId, name, imageUrl }),
+          body: JSON.stringify({ worldId, name, imageUrl, heading, magnetic }),
         })
         if (!response.ok) throw new Error(`Request failed: ${response.status}`)
         const scene = (await response.json()) as WorldScene
@@ -93,16 +101,19 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     [worldId],
   )
 
-  /** A new scene reached from the view on screen — `angleOffset` is the angle it hangs off. */
+  /**
+   * A new scene reached from the view on screen — `angleOffset` is the angle it hangs
+   * off; `heading` and `magnetic` describe the new scene's own image.
+   */
   const createLink = useCallback(
-    async (label: string, imageUrl: string, angleOffset: number) => {
+    async (label: string, imageUrl: string, angleOffset: number, heading: number, magnetic: boolean) => {
       if (!currentScene) return
       setError(null)
       try {
         const response = await fetch(`/api/scenes/${currentScene.id}/links`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ label, imageUrl, angleOffset }),
+          body: JSON.stringify({ label, imageUrl, angleOffset, heading, magnetic }),
         })
         if (!response.ok) throw new Error(`Request failed: ${response.status}`)
         const { scene, link } = (await response.json()) as { scene: WorldScene; link: SceneLink }
@@ -137,16 +148,16 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     [currentScene],
   )
 
-  /** Turn from the angle on screen and hang a new one off it. */
+  /** Add an angle to an option, looking towards `heading`. Resolves to it, or null if it was refused. */
   const createAngle = useCallback(
-    async (optionKey: string, fromOffset: number, direction: AngleDirection, imageUrl: string) => {
-      if (!currentScene) return
+    async (optionKey: string, imageUrl: string, heading: number, magnetic: boolean) => {
+      if (!currentScene) return null
       setError(null)
       try {
         const response = await fetch(`/api/scenes/${currentScene.id}/angles`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ variantId: toVariantId(optionKey), fromOffset, direction, imageUrl }),
+          body: JSON.stringify({ variantId: toVariantId(optionKey), imageUrl, heading, magnetic }),
         })
         if (!response.ok) throw new Error(`Request failed: ${response.status}`)
         const angle = (await response.json()) as SceneAngle
@@ -156,14 +167,16 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
           const next = [...existing, angle].sort((a, b) => a.offset - b.offset)
           return { ...prev, angles: { ...(prev.angles ?? {}), [optionKey]: next } }
         })
+        return angle
       } catch {
         setError('create-failed')
+        return null
       }
     },
     [currentScene],
   )
 
-  /** Removing an angle also removes everything further out on that side. */
+  /** Removing an angle takes its story and link placements with it; the other angles stay. */
   const deleteAngle = useCallback(
     async (optionKey: string, angleId: string) => {
       if (!currentScene) return
@@ -279,6 +292,43 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     [currentScene],
   )
 
+  const setViewMagnetic = useCallback(
+    (optionKey: string, angleOffset: number, magnetic: boolean) => {
+      if (!currentScene) return
+
+      const angle =
+        angleOffset === 0
+          ? null
+          : (currentScene.angles?.[optionKey] ?? []).find((item) => item.offset === angleOffset)
+      if (angleOffset !== 0 && !angle) return
+
+      setCurrentScene((prev) => {
+        if (!prev) return prev
+        // The option image is the scene's own view, shared by every option.
+        if (!angle) return { ...prev, magnetic }
+        return {
+          ...prev,
+          angles: {
+            ...(prev.angles ?? {}),
+            [optionKey]: (prev.angles?.[optionKey] ?? []).map((item) =>
+              item.id === angle.id ? { ...item, magnetic } : item,
+            ),
+          },
+        }
+      })
+
+      const url = angle
+        ? `/api/scenes/${currentScene.id}/angles/${angle.id}/magnetic`
+        : `/api/scenes/${currentScene.id}/magnetic`
+      fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ magnetic }),
+      }).catch(() => {})
+    },
+    [currentScene],
+  )
+
   const goToScene = useCallback(async (sceneId: string) => {
     setError(null)
     try {
@@ -362,6 +412,7 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     createVariant,
     createAngle,
     deleteAngle,
+    setViewMagnetic,
     saveStory,
     changeViewImage,
     goToScene,

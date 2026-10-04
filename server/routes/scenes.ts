@@ -13,6 +13,8 @@ interface SceneRow {
   created_at: string
   canvas_x: number | null
   canvas_y: number | null
+  heading: number
+  magnetic: number
 }
 
 interface SceneLinkRow {
@@ -72,6 +74,12 @@ function parseAngleOffset(value: unknown): number | null {
   return Number.isInteger(offset) ? offset : null
 }
 
+/** A heading is whole degrees clockwise from 12 o'clock, so 0 up to but not including 360. */
+function parseHeading(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isInteger(value)) return null
+  return value >= 0 && value < 360 ? value : null
+}
+
 interface SceneAngleRow {
   id: string
   scene_id: string
@@ -79,6 +87,9 @@ interface SceneAngleRow {
   angle_offset: number
   image_url: string
   created_at: string
+  /** Null on angles from before headings existed, until the author sets one. */
+  heading: number | null
+  magnetic: number
 }
 
 function toSceneAngle(row: SceneAngleRow) {
@@ -89,6 +100,8 @@ function toSceneAngle(row: SceneAngleRow) {
     offset: row.angle_offset,
     imageUrl: row.image_url,
     createdAt: row.created_at,
+    heading: row.heading,
+    magnetic: row.magnetic === 1,
   }
 }
 
@@ -196,7 +209,32 @@ function toScene(row: SceneRow) {
     createdAt: row.created_at,
     canvasX: row.canvas_x,
     canvasY: row.canvas_y,
+    heading: row.heading,
+    magnetic: row.magnetic === 1,
   }
+}
+
+/**
+ * Whether another image already looks that way. Within one option every image faces its
+ * own direction — two hands on the same mark could not be told apart. The scene's own
+ * image is the front of every option, so `variantId` undefined checks it against all of
+ * the scene's angles; otherwise the check stays inside that one option.
+ */
+function headingTaken(
+  scene: SceneRow,
+  variantId: string | null | undefined,
+  heading: number,
+  exceptAngleId?: string,
+): boolean {
+  if (variantId !== undefined && scene.heading === heading) return true
+
+  const variantClause =
+    variantId === undefined ? '' : variantId === null ? 'AND variant_id IS NULL' : 'AND variant_id = ?'
+  const variantParams = variantId ? [variantId] : []
+  const clash = db
+    .prepare(`SELECT id FROM scene_angles WHERE scene_id = ? ${variantClause} AND heading = ? AND id IS NOT ?`)
+    .get(scene.id, ...variantParams, heading, exceptAngleId ?? null)
+  return clash !== undefined
 }
 
 function toSceneLink(row: SceneLinkRow) {
@@ -246,7 +284,7 @@ function linkAt(sceneId: string, angleOffset: number, exceptLinkId?: string) {
     .get(sceneId, angleOffset, exceptLinkId ?? null) as { id: string } | undefined
 }
 
-/** The view nearest the option image that has no exit yet, or null when every one is taken. */
+/** The option image if it has no exit yet, else the first free angle; null when every view is taken. */
 function firstFreeOffset(sceneId: string): number | null {
   const offsets = sceneOffsets(sceneId).sort((a, b) => Math.abs(a) - Math.abs(b) || b - a)
   return offsets.find((offset) => !linkAt(sceneId, offset)) ?? null
@@ -298,7 +336,8 @@ scenesRouter.get('/graph', (req, res) => {
           .all(...sceneIds) as SceneLinkRow[])
 
   res.json({
-    scenes: sceneRows.map(toScene),
+    // The canvas draws each scene as its angle ring, so the angles come along.
+    scenes: sceneRows.map((row) => ({ ...toScene(row), angles: loadAngles(row.id) })),
     links: linkRows.map(toSceneLink),
   })
 })
@@ -461,36 +500,52 @@ scenesRouter.delete('/:id/variants/:variantId', (req, res) => {
 })
 
 /**
- * Add a viewing angle next to the one currently on screen. `direction` decides which
- * way you turn from `fromOffset`, so angles grow outwards as a chain in each direction:
- * 0 → +1 → +2 to the right, 0 → -1 → -2 to the left.
+ * The slot a new angle takes. A slot is what stories and links hang off, and one slot is
+ * the same view in every option — so an angle looking the way another option's angle
+ * already looks joins that slot and shares its link. Otherwise it gets a slot no option
+ * of the scene has used.
+ */
+function slotFor(sceneId: string, variantId: string | null, heading: number): number {
+  const rows = db
+    .prepare('SELECT variant_id, angle_offset, heading FROM scene_angles WHERE scene_id = ?')
+    .all(sceneId) as Pick<SceneAngleRow, 'variant_id' | 'angle_offset' | 'heading'>[]
+
+  const own = new Set(rows.filter((row) => row.variant_id === variantId).map((row) => row.angle_offset))
+  const twin = rows.find((row) => row.heading === heading && !own.has(row.angle_offset))
+  if (twin) return twin.angle_offset
+
+  const used = new Set(rows.map((row) => row.angle_offset))
+  let slot = 1
+  while (used.has(slot)) slot++
+  return slot
+}
+
+/**
+ * Add a viewing angle to one option. `heading` is the way it looks, as a hand on the
+ * scene's ring, and is all that places it: turning goes round the ring from hand to hand.
  */
 scenesRouter.post('/:id/angles', (req, res) => {
-  const { variantId, fromOffset, direction, imageUrl } = req.body as {
+  const { variantId, imageUrl, heading, magnetic } = req.body as {
     variantId?: string | null
-    fromOffset?: number
-    direction?: string
     imageUrl?: string
+    heading?: number
+    magnetic?: boolean
   }
 
-  if (direction !== 'left' && direction !== 'right') {
-    res.status(400).json({ error: "direction must be 'left' or 'right'" })
-    return
-  }
   if (!imageUrl) {
     res.status(400).json({ error: 'imageUrl is required' })
+    return
+  }
+  // An angle is a direction to look in, so it cannot be added without one.
+  const angleHeading = parseHeading(heading)
+  if (angleHeading === null) {
+    res.status(400).json({ error: 'heading must be whole degrees from 0 to 359' })
     return
   }
 
   const scene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
   if (!scene) {
     res.status(404).json({ error: 'Scene not found' })
-    return
-  }
-
-  const from = parseAngleOffset(fromOffset)
-  if (from === null) {
-    res.status(400).json({ error: 'fromOffset must be an integer' })
     return
   }
 
@@ -507,17 +562,6 @@ scenesRouter.post('/:id/angles', (req, res) => {
     optionImageUrl = variant.image_url
   }
 
-  if (from !== 0 && !findAngle(req.params.id, targetVariant, from)) {
-    res.status(404).json({ error: 'Angle not found on this option' })
-    return
-  }
-
-  const offset = from + (direction === 'right' ? 1 : -1)
-  if (findAngle(req.params.id, targetVariant, offset)) {
-    res.status(409).json({ error: 'This option already has an angle in that direction' })
-    return
-  }
-
   if (imageUrl === optionImageUrl) {
     res.status(409).json({ error: 'Image is already the image of this option' })
     return
@@ -531,12 +575,26 @@ scenesRouter.post('/:id/angles', (req, res) => {
     res.status(409).json({ error: 'Image is already an angle of this option' })
     return
   }
+  if (headingTaken(scene, targetVariant, angleHeading)) {
+    res.status(409).json({ error: 'Another image of this option already looks that way' })
+    return
+  }
 
   const id = randomUUID()
+  const offset = slotFor(req.params.id, targetVariant, angleHeading)
   db.prepare(`
-    INSERT INTO scene_angles (id, scene_id, variant_id, angle_offset, image_url, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, req.params.id, targetVariant, offset, imageUrl, new Date().toISOString())
+    INSERT INTO scene_angles (id, scene_id, variant_id, angle_offset, image_url, created_at, heading, magnetic)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    req.params.id,
+    targetVariant,
+    offset,
+    imageUrl,
+    new Date().toISOString(),
+    angleHeading,
+    magnetic === true ? 1 : 0,
+  )
 
   const row = db.prepare('SELECT * FROM scene_angles WHERE id = ?').get(id) as SceneAngleRow
   res.status(201).json(toSceneAngle(row))
@@ -563,9 +621,56 @@ scenesRouter.patch('/:id/angles/:angleId/image', (req, res) => {
   res.json(toSceneAngle(row))
 })
 
+/** Turn one angle's hand: which way its image looks. */
+scenesRouter.patch('/:id/angles/:angleId/heading', (req, res) => {
+  const heading = parseHeading((req.body as { heading?: number }).heading)
+  if (heading === null) {
+    res.status(400).json({ error: 'heading must be whole degrees from 0 to 359' })
+    return
+  }
+
+  const scene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
+  const angle = db
+    .prepare('SELECT * FROM scene_angles WHERE id = ? AND scene_id = ?')
+    .get(req.params.angleId, req.params.id) as SceneAngleRow | undefined
+  if (!scene || !angle) {
+    res.status(404).json({ error: 'Angle not found on this scene' })
+    return
+  }
+  if (headingTaken(scene, angle.variant_id, heading, angle.id)) {
+    res.status(409).json({ error: 'Another image of this option already looks that way' })
+    return
+  }
+
+  db.prepare('UPDATE scene_angles SET heading = ? WHERE id = ?').run(heading, req.params.angleId)
+  const row = db.prepare('SELECT * FROM scene_angles WHERE id = ?').get(req.params.angleId) as SceneAngleRow
+  res.json(toSceneAngle(row))
+})
+
+/** Make one angle magnetic, or plain again. */
+scenesRouter.patch('/:id/angles/:angleId/magnetic', (req, res) => {
+  const { magnetic } = req.body as { magnetic?: boolean }
+  if (typeof magnetic !== 'boolean') {
+    res.status(400).json({ error: 'magnetic must be true or false' })
+    return
+  }
+
+  const angle = db
+    .prepare('SELECT * FROM scene_angles WHERE id = ? AND scene_id = ?')
+    .get(req.params.angleId, req.params.id) as SceneAngleRow | undefined
+  if (!angle) {
+    res.status(404).json({ error: 'Angle not found on this scene' })
+    return
+  }
+
+  db.prepare('UPDATE scene_angles SET magnetic = ? WHERE id = ?').run(magnetic ? 1 : 0, req.params.angleId)
+  const row = db.prepare('SELECT * FROM scene_angles WHERE id = ?').get(req.params.angleId) as SceneAngleRow
+  res.json(toSceneAngle(row))
+})
+
 /**
- * Remove an angle. Everything further out on the same side goes with it — those angles
- * were only reachable by turning through this one.
+ * Remove an angle, with the story and link placements that hang off it. The other angles
+ * stay: each is reached by turning round the ring, not by passing through this one.
  */
 scenesRouter.delete('/:id/angles/:angleId', (req, res) => {
   const angle = db
@@ -576,33 +681,31 @@ scenesRouter.delete('/:id/angles/:angleId', (req, res) => {
     return
   }
 
-  const variantClause = angle.variant_id === null ? 'variant_id IS NULL' : 'variant_id = ?'
-  const variantParams = angle.variant_id === null ? [] : [angle.variant_id]
-  const comparison = angle.angle_offset > 0 ? 'angle_offset >= ?' : 'angle_offset <= ?'
-
-  const orphaned = db
-    .prepare(`SELECT * FROM scene_angles WHERE scene_id = ? AND ${variantClause} AND ${comparison}`)
-    .all(req.params.id, ...variantParams, angle.angle_offset) as SceneAngleRow[]
-
-  for (const row of orphaned) {
-    deleteAngleDependents(req.params.id, row.variant_id, row.angle_offset)
-    db.prepare('DELETE FROM scene_angles WHERE id = ?').run(row.id)
-  }
+  deleteAngleDependents(req.params.id, angle.variant_id, angle.angle_offset)
+  db.prepare('DELETE FROM scene_angles WHERE id = ?').run(angle.id)
   rehomeStrandedLinks(req.params.id)
 
-  res.json({ removedOffsets: orphaned.map((row) => row.angle_offset), links: loadLinks(req.params.id) })
+  res.json({ removedOffsets: [angle.angle_offset], links: loadLinks(req.params.id) })
 })
 
 scenesRouter.post('/', (req, res) => {
-  const { worldId, name, imageUrl, canvasX, canvasY } = req.body as {
+  const { worldId, name, imageUrl, canvasX, canvasY, heading, magnetic } = req.body as {
     worldId?: string
     name?: string
     imageUrl?: string
     canvasX?: number
     canvasY?: number
+    heading?: number
+    magnetic?: boolean
   }
   if (!worldId || !name || !imageUrl) {
     res.status(400).json({ error: 'worldId, name and imageUrl are required' })
+    return
+  }
+  // Left out, the scene's image faces 12 o'clock.
+  const sceneHeading = heading === undefined ? 0 : parseHeading(heading)
+  if (sceneHeading === null) {
+    res.status(400).json({ error: 'heading must be whole degrees from 0 to 359' })
     return
   }
 
@@ -615,8 +718,9 @@ scenesRouter.post('/', (req, res) => {
   const id = randomUUID()
   const now = new Date().toISOString()
   db.prepare(
-    'INSERT INTO scenes (id, world_id, name, image_url, created_at, canvas_x, canvas_y) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  ).run(id, worldId, name, imageUrl, now, canvasX ?? null, canvasY ?? null)
+    `INSERT INTO scenes (id, world_id, name, image_url, created_at, canvas_x, canvas_y, heading, magnetic)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, worldId, name, imageUrl, now, canvasX ?? null, canvasY ?? null, sceneHeading, magnetic === true ? 1 : 0)
 
   const row = db.prepare('SELECT * FROM scenes WHERE id = ?').get(id) as SceneRow
   res.status(201).json(toScene(row))
@@ -662,6 +766,48 @@ scenesRouter.patch('/:id/variants/:variantId/image', (req, res) => {
   res.json(toSceneVariant(row))
 })
 
+/** Turn the scene's own hand: which way its image, and every option's image, looks. */
+scenesRouter.patch('/:id/heading', (req, res) => {
+  const heading = parseHeading((req.body as { heading?: number }).heading)
+  if (heading === null) {
+    res.status(400).json({ error: 'heading must be whole degrees from 0 to 359' })
+    return
+  }
+
+  const scene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
+  if (!scene) {
+    res.status(404).json({ error: 'Scene not found' })
+    return
+  }
+  if (headingTaken(scene, undefined, heading)) {
+    res.status(409).json({ error: "One of this scene's angles already looks that way" })
+    return
+  }
+
+  db.prepare('UPDATE scenes SET heading = ? WHERE id = ?').run(heading, req.params.id)
+  const row = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow
+  res.json(toScene(row))
+})
+
+/** Make the scene's own image magnetic, or plain again — in every option. */
+scenesRouter.patch('/:id/magnetic', (req, res) => {
+  const { magnetic } = req.body as { magnetic?: boolean }
+  if (typeof magnetic !== 'boolean') {
+    res.status(400).json({ error: 'magnetic must be true or false' })
+    return
+  }
+
+  const scene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
+  if (!scene) {
+    res.status(404).json({ error: 'Scene not found' })
+    return
+  }
+
+  db.prepare('UPDATE scenes SET magnetic = ? WHERE id = ?').run(magnetic ? 1 : 0, req.params.id)
+  const row = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow
+  res.json(toScene(row))
+})
+
 scenesRouter.patch('/:id/position', (req, res) => {
   const { canvasX, canvasY } = req.body as { canvasX?: number; canvasY?: number }
   const existing = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
@@ -685,15 +831,24 @@ scenesRouter.patch('/:id/position', (req, res) => {
  * means the option image. Each view holds at most one exit, so a taken view is refused.
  */
 scenesRouter.post('/:id/links', (req, res) => {
-  const { label, imageUrl, positionX, positionY, angleOffset } = req.body as {
+  const { label, imageUrl, positionX, positionY, angleOffset, heading, magnetic } = req.body as {
     label?: string
     imageUrl?: string
     positionX?: number
     positionY?: number
     angleOffset?: number
+    heading?: number
+    magnetic?: boolean
   }
   if (!label || !imageUrl) {
     res.status(400).json({ error: 'label and imageUrl are required' })
+    return
+  }
+  // The heading and the magnet are the new scene's, not this one's. Left out, it faces
+  // 12 o'clock and is plain.
+  const targetHeading = heading === undefined ? 0 : parseHeading(heading)
+  if (targetHeading === null) {
+    res.status(400).json({ error: 'heading must be whole degrees from 0 to 359' })
     return
   }
 
@@ -720,13 +875,9 @@ scenesRouter.post('/:id/links', (req, res) => {
   const now = new Date().toISOString()
 
   const targetId = randomUUID()
-  db.prepare('INSERT INTO scenes (id, world_id, name, image_url, created_at) VALUES (?, ?, ?, ?, ?)').run(
-    targetId,
-    originRow.world_id,
-    label,
-    imageUrl,
-    now,
-  )
+  db.prepare(
+    'INSERT INTO scenes (id, world_id, name, image_url, created_at, heading, magnetic) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  ).run(targetId, originRow.world_id, label, imageUrl, now, targetHeading, magnetic === true ? 1 : 0)
 
   const forwardId = randomUUID()
   db.prepare(`
@@ -769,7 +920,7 @@ scenesRouter.post('/:id/connect', (req, res) => {
   }
 
   // Both ends need a free view to hang their exit on; the canvas has no view on screen,
-  // so each takes the one nearest its option image.
+  // so each takes its option image, or failing that its first free angle.
   const forwardOffset = firstFreeOffset(originRow.id)
   const backwardOffset = firstFreeOffset(targetRow.id)
   if (forwardOffset === null || backwardOffset === null) {
