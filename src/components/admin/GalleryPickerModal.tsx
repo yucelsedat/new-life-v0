@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { FiX } from 'react-icons/fi'
 import { useGalleryImages, type GalleryScope } from '../../hooks/useGalleryImages'
 import { useT } from '../../i18n'
+import HeadingDial from './HeadingDial'
+import MagnetToggle from './MagnetToggle'
 
 interface GalleryPickerModalProps {
   open: boolean
@@ -13,7 +15,12 @@ interface GalleryPickerModalProps {
   hiddenUrls?: string[]
   /** Which image library to pick from. */
   scope: GalleryScope
-  onConfirm: (name: string, imageUrl: string) => void
+  /**
+   * Set when the image becomes a new scene: it then needs the direction it looks in and
+   * whether it is magnetic, picked beside the grid and handed to onConfirm.
+   */
+  withHeading?: boolean
+  onConfirm: (name: string, imageUrl: string, heading: number, magnetic: boolean) => void
   onCancel: () => void
 }
 
@@ -23,6 +30,7 @@ export default function GalleryPickerModal({
   isSubmitting,
   hiddenUrls = [],
   scope,
+  withHeading = false,
   onConfirm,
   onCancel,
 }: GalleryPickerModalProps) {
@@ -30,6 +38,9 @@ export default function GalleryPickerModal({
   const { images } = useGalleryImages(scope)
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null)
   const [name, setName] = useState('')
+  // A new location's first hand starts at 12 and is turned from there.
+  const [heading, setHeading] = useState(0)
+  const [magnetic, setMagnetic] = useState(false)
 
   const needsName = nameLabel !== null
   const hiddenSet = new Set(hiddenUrls)
@@ -38,15 +49,19 @@ export default function GalleryPickerModal({
   function handleClose() {
     setSelectedUrl(null)
     setName('')
+    setHeading(0)
+    setMagnetic(false)
     onCancel()
   }
 
   function handleConfirm() {
     if (!selectedUrl) return
     if (needsName && !name.trim()) return
-    onConfirm(name.trim(), selectedUrl)
+    onConfirm(name.trim(), selectedUrl, heading, magnetic)
     setSelectedUrl(null)
     setName('')
+    setHeading(0)
+    setMagnetic(false)
   }
 
   return (
@@ -65,7 +80,9 @@ export default function GalleryPickerModal({
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
             onClick={(event) => event.stopPropagation()}
-            className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-abyss backdrop-blur-2xl"
+            className={`flex max-h-[85vh] w-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-abyss backdrop-blur-2xl ${
+              withHeading ? 'max-w-4xl' : 'max-w-3xl'
+            }`}
           >
             <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
               <h3 className="font-display text-h2 font-[300] text-white/95">{t.admin.editor.modal.chooseImage}</h3>
@@ -74,33 +91,47 @@ export default function GalleryPickerModal({
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-6 py-5">
-              {available.length === 0 ? (
-                <p className="font-sans text-caption text-mist">
-                  {images.length === 0 ? t.admin.editor.modal.empty : t.admin.editor.modal.allUsed}
-                </p>
-              ) : (
-                <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
-                  {available.map((image) => {
-                    const isSelected = selectedUrl === image.url
-                    return (
-                      <button
-                        key={image.id}
-                        type="button"
-                        onClick={() => setSelectedUrl(image.url)}
-                        className={`relative overflow-hidden rounded-xl border-2 transition ${
-                          isSelected ? 'border-gold-bright' : 'border-transparent hover:border-white/20'
-                        }`}
-                      >
-                        <img
-                          src={image.url}
-                          alt={image.originalName}
-                          className="aspect-square w-full object-cover"
-                        />
-                      </button>
-                    )
-                  })}
-                </div>
+            <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+              <div className="flex-1 overflow-y-auto px-6 py-5">
+                {available.length === 0 ? (
+                  <p className="font-sans text-caption text-mist">
+                    {images.length === 0 ? t.admin.editor.modal.empty : t.admin.editor.modal.allUsed}
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+                    {available.map((image) => {
+                      const isSelected = selectedUrl === image.url
+                      return (
+                        <button
+                          key={image.id}
+                          type="button"
+                          onClick={() => setSelectedUrl(image.url)}
+                          className={`relative overflow-hidden rounded-xl border-2 transition ${
+                            isSelected ? 'border-gold-bright' : 'border-transparent hover:border-white/20'
+                          }`}
+                        >
+                          <img
+                            src={image.url}
+                            alt={image.originalName}
+                            className="aspect-square w-full object-cover"
+                          />
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {withHeading && (
+                <aside className="flex shrink-0 flex-col gap-5 overflow-y-auto border-t border-white/10 px-6 py-5 sm:w-64 sm:border-l sm:border-t-0">
+                  <HeadingDial
+                    value={heading}
+                    magnetic={magnetic}
+                    hint={t.admin.heading.sceneHint}
+                    onChange={setHeading}
+                  />
+                  <MagnetToggle checked={magnetic} onChange={setMagnetic} />
+                </aside>
               )}
             </div>
 

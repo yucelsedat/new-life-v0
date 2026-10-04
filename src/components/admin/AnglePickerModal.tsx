@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { FiArrowLeft, FiArrowRight, FiChevronLeft, FiX } from 'react-icons/fi'
+import { FiX } from 'react-icons/fi'
 import { useGalleryImages, type GalleryScope } from '../../hooks/useGalleryImages'
 import { useT } from '../../i18n'
-import type { AngleDirection } from '../../types/world'
+import HeadingDial from './HeadingDial'
+import MagnetToggle from './MagnetToggle'
+import type { RingHand } from '../../utils/heading'
 
 interface AnglePickerModalProps {
   open: boolean
@@ -12,50 +14,51 @@ interface AnglePickerModalProps {
   scope: GalleryScope
   /** Image URLs already used in this world — hidden from the grid entirely. */
   hiddenUrls?: string[]
-  /** Directions that already have an angle hanging off the current view. */
-  takenDirections?: AngleDirection[]
-  onConfirm: (direction: AngleDirection, imageUrl: string) => void
+  /** The hands already on this option's ring: its own image and its angles. */
+  hands?: RingHand[]
+  onConfirm: (imageUrl: string, heading: number, magnetic: boolean) => void
   onCancel: () => void
 }
 
 /**
- * Two steps, in this order: which way you turn, then what you see there. The direction
- * comes first because it is the thing that decides where the new angle lands.
+ * What the new angle shows and which way it looks. The hand on the dial is all that
+ * places the angle: where it points decides where it comes round when turning.
  */
 export default function AnglePickerModal({
   open,
   isSubmitting,
   scope,
   hiddenUrls = [],
-  takenDirections = [],
+  hands = [],
   onConfirm,
   onCancel,
 }: AnglePickerModalProps) {
   const t = useT()
   const { images } = useGalleryImages(scope)
-  const [direction, setDirection] = useState<AngleDirection | null>(null)
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null)
+  /** Null until the hand is pointed somewhere — an angle cannot be added without it. */
+  const [heading, setHeading] = useState<number | null>(null)
+  const [magnetic, setMagnetic] = useState(false)
 
   const hiddenSet = new Set(hiddenUrls)
   const available = images.filter((image) => !hiddenSet.has(image.url))
 
-  function handleClose() {
-    setDirection(null)
+  function reset() {
     setSelectedUrl(null)
+    setHeading(null)
+    setMagnetic(false)
+  }
+
+  function handleClose() {
+    reset()
     onCancel()
   }
 
   function handleConfirm() {
-    if (!direction || !selectedUrl) return
-    onConfirm(direction, selectedUrl)
-    setDirection(null)
-    setSelectedUrl(null)
+    if (!selectedUrl || heading === null) return
+    onConfirm(selectedUrl, heading, magnetic)
+    reset()
   }
-
-  const directions: { value: AngleDirection; icon: typeof FiArrowLeft; label: string }[] = [
-    { value: 'left', icon: FiArrowLeft, label: t.admin.angle.left },
-    { value: 'right', icon: FiArrowRight, label: t.admin.angle.right },
-  ]
 
   return (
     <AnimatePresence>
@@ -73,57 +76,19 @@ export default function AnglePickerModal({
             exit={{ opacity: 0, scale: 0.96, y: 12 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
             onClick={(event) => event.stopPropagation()}
-            className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-abyss backdrop-blur-2xl"
+            className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-abyss backdrop-blur-2xl"
           >
             <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
-              <div className="flex items-center gap-3">
-                {direction && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDirection(null)
-                      setSelectedUrl(null)
-                    }}
-                    className="text-white/50 transition hover:text-white"
-                    title={t.admin.angle.backToDirection}
-                  >
-                    <FiChevronLeft className="h-5 w-5" />
-                  </button>
-                )}
-                <div>
-                  <h3 className="font-display text-h2 font-[300] text-white/95">{t.admin.angle.modalTitle}</h3>
-                  <p className="font-sans text-caption text-mist">
-                    {direction ? t.admin.angle.stepImage : t.admin.angle.stepDirection}
-                  </p>
-                </div>
+              <div>
+                <h3 className="font-display text-h2 font-[300] text-white/95">{t.admin.angle.modalTitle}</h3>
+                <p className="font-sans text-caption text-mist">{t.admin.angle.modalSubtitle}</p>
               </div>
               <button type="button" onClick={handleClose} className="text-white/50 transition hover:text-white">
                 <FiX className="h-5 w-5" />
               </button>
             </div>
 
-            {!direction ? (
-              <div className="flex flex-1 items-center justify-center gap-5 px-6 py-10">
-                {directions.map(({ value, icon: Icon, label }) => {
-                  const taken = takenDirections.includes(value)
-                  return (
-                    <button
-                      key={value}
-                      type="button"
-                      disabled={taken}
-                      onClick={() => setDirection(value)}
-                      title={taken ? t.admin.angle.alreadyTaken : label}
-                      className="group flex w-40 flex-col items-center gap-3 rounded-2xl border border-white/12 bg-white/[0.03] px-6 py-8 transition enabled:hover:border-gold-bright enabled:hover:bg-white/[0.06] disabled:cursor-not-allowed disabled:opacity-30"
-                    >
-                      <Icon className="h-10 w-10 text-white/70 transition group-enabled:group-hover:text-gold-bright" />
-                      <span className="font-sans text-caption font-[700] text-white/80 transition group-enabled:group-hover:text-gold-bright">
-                        {label}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
-            ) : (
+            <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
               <div className="flex-1 overflow-y-auto px-6 py-5">
                 {available.length === 0 ? (
                   <p className="font-sans text-caption text-mist">
@@ -153,10 +118,23 @@ export default function AnglePickerModal({
                   </div>
                 )}
               </div>
-            )}
+
+              <aside className="flex shrink-0 flex-col gap-5 overflow-y-auto border-t border-white/10 px-6 py-5 sm:w-64 sm:border-l sm:border-t-0">
+                <HeadingDial
+                  value={heading}
+                  others={hands}
+                  magnetic={magnetic}
+                  hint={t.admin.heading.angleHint}
+                  onChange={setHeading}
+                />
+                <MagnetToggle checked={magnetic} onChange={setMagnetic} />
+              </aside>
+            </div>
 
             <div className="flex items-center gap-3 border-t border-white/10 px-6 py-4">
-              <div className="flex-1" />
+              <p className="flex-1 font-sans text-caption text-gold-bright/80">
+                {heading === null ? t.admin.heading.required : ''}
+              </p>
               <button
                 type="button"
                 onClick={handleClose}
@@ -167,7 +145,7 @@ export default function AnglePickerModal({
               <button
                 type="button"
                 onClick={handleConfirm}
-                disabled={!direction || !selectedUrl || isSubmitting}
+                disabled={!selectedUrl || heading === null || isSubmitting}
                 className="rounded-xl bg-gradient-to-r from-gold to-gold-bright px-5 py-3 font-sans text-body font-[700] text-abyss transition disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {isSubmitting ? t.admin.editor.creating : t.admin.angle.confirm}

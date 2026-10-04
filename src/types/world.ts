@@ -90,11 +90,13 @@ export interface WorldOptionTime {
   minuteOfDay: number
 }
 
+/** Which way a turn goes round a scene's ring: left is anticlockwise, right clockwise. */
 export type AngleDirection = 'left' | 'right'
 
 /**
- * Another viewing direction of the same option. `offset` is signed and relative to the
- * option image (offset 0, never stored): +1, +2… turning right, -1, -2… turning left.
+ * Another viewing direction of the same option. `offset` is the slot its story and link
+ * hang off — 0 is the option image and is never stored — and one slot is the same view
+ * in every option. It says nothing about direction; that is `heading`.
  */
 export interface SceneAngle {
   id: string
@@ -103,6 +105,13 @@ export interface SceneAngle {
   offset: number
   imageUrl: string
   createdAt: string
+  /**
+   * Which way this image looks, in degrees clockwise from 12 o'clock — its hand on the
+   * scene's angle ring. Null on an angle from before headings existed.
+   */
+  heading: number | null
+  /** Pulls in someone arriving from another location — see arrivalOffset. */
+  magnetic: boolean
 }
 
 /** Key is a variant id, or 'base' for the scene's own image. */
@@ -125,22 +134,6 @@ export function viewKey(optionKey: string, angleOffset: number): string {
   return `${optionKey}#${angleOffset}`
 }
 
-/**
- * The offset one turn away from `offset`. The option image and its angles form a full
- * circle, so turning past the last angle on one side comes back round from the other
- * side — the way someone turning on the spot ends up facing where they started.
- * Null when the option has no angles, since there is nowhere to turn to.
- */
-export function turnAngle(offset: number, angles: SceneAngle[], direction: AngleDirection): number | null {
-  if (angles.length === 0) return null
-  // Offsets never leave gaps (deleting an angle takes everything beyond it too), so the
-  // circle is every offset from the leftmost angle to the rightmost one, 0 included.
-  const min = Math.min(0, ...angles.map((angle) => angle.offset))
-  const max = Math.max(0, ...angles.map((angle) => angle.offset))
-  if (direction === 'right') return offset >= max ? min : offset + 1
-  return offset <= min ? max : offset - 1
-}
-
 export interface WorldScene {
   id: string
   worldId: string
@@ -149,6 +142,10 @@ export interface WorldScene {
   createdAt: string
   canvasX: number | null
   canvasY: number | null
+  /** Which way the scene's own image looks — and with it the image of every option. */
+  heading: number
+  /** Whether that image, the main view of every option, is magnetic. */
+  magnetic: boolean
   links?: SceneLink[]
   variants?: SceneVariant[]
   angles?: SceneAngles
