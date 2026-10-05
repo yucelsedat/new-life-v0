@@ -284,10 +284,14 @@ function linkAt(sceneId: string, angleOffset: number, exceptLinkId?: string) {
     .get(sceneId, angleOffset, exceptLinkId ?? null) as { id: string } | undefined
 }
 
+/** Every view of a scene that holds no exit yet. */
+function freeOffsets(sceneId: string): number[] {
+  return sceneOffsets(sceneId).filter((offset) => !linkAt(sceneId, offset))
+}
+
 /** The option image if it has no exit yet, else the first free angle; null when every view is taken. */
 function firstFreeOffset(sceneId: string): number | null {
-  const offsets = sceneOffsets(sceneId).sort((a, b) => Math.abs(a) - Math.abs(b) || b - a)
-  return offsets.find((offset) => !linkAt(sceneId, offset)) ?? null
+  return freeOffsets(sceneId).sort((a, b) => Math.abs(a) - Math.abs(b) || b - a)[0] ?? null
 }
 
 /**
@@ -336,8 +340,14 @@ scenesRouter.get('/graph', (req, res) => {
           .all(...sceneIds) as SceneLinkRow[])
 
   res.json({
-    // The canvas draws each scene as its angle ring, so the angles come along.
-    scenes: sceneRows.map((row) => ({ ...toScene(row), angles: loadAngles(row.id) })),
+    // The canvas draws each scene as its angle ring and edits it from there, so its
+    // angles, options and stories come along.
+    scenes: sceneRows.map((row) => ({
+      ...toScene(row),
+      angles: loadAngles(row.id),
+      variants: loadVariants(row.id),
+      stories: loadStories(row.id),
+    })),
     links: linkRows.map(toSceneLink),
   })
 })
@@ -952,6 +962,150 @@ scenesRouter.post('/:id/connect', (req, res) => {
 })
 
 /**
+ * Give `from` an exit to `to` unless it already has one: hung on a view picked at random
+ * from those still free, and named after the scene it leads to. A scene whose every view
+ * is taken is left as it is.
+ */
+function hangRandomLink(from: SceneRow, to: SceneRow, now: string) {
+  const existing = db
+    .prepare('SELECT id FROM scene_links WHERE from_scene_id = ? AND to_scene_id = ?')
+    .get(from.id, to.id)
+  if (existing) return { status: 'linked' as const, link: null }
+
+  const free = freeOffsets(from.id)
+  if (free.length === 0) return { status: 'full' as const, link: null }
+
+  const id = randomUUID()
+  db.prepare(`
+    INSERT INTO scene_links (id, from_scene_id, to_scene_id, label, position_x, position_y, angle_offset, created_at)
+    VALUES (?, ?, ?, ?, 50, 50, ?, ?)
+  `).run(id, from.id, to.id, to.name, free[Math.floor(Math.random() * free.length)], now)
+
+  const row = db.prepare('SELECT * FROM scene_links WHERE id = ?').get(id) as SceneLinkRow
+  return { status: 'created' as const, link: toSceneLink(row) }
+}
+
+/**
+ * Join two scenes without asking anything: each end that has no exit to the other yet
+ * gets one on a random free view. The ends are settled apart, so a pair already joined
+ * one way only gains the way back, and one end being full does not hold up the other.
+ */
+scenesRouter.post('/:id/connect/random', (req, res) => {
+  const { targetSceneId } = req.body as { targetSceneId?: string }
+  if (!targetSceneId) {
+    res.status(400).json({ error: 'targetSceneId is required' })
+    return
+  }
+  if (targetSceneId === req.params.id) {
+    res.status(400).json({ error: 'Cannot connect a scene to itself' })
+    return
+  }
+
+  const originRow = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
+  const targetRow = db.prepare('SELECT * FROM scenes WHERE id = ?').get(targetSceneId) as SceneRow | undefined
+  if (!originRow || !targetRow) {
+    res.status(404).json({ error: 'Scene not found' })
+    return
+  }
+  if (originRow.world_id !== targetRow.world_id) {
+    res.status(400).json({ error: 'Scenes belong to different worlds' })
+    return
+  }
+
+  const now = new Date().toISOString()
+  const forward = hangRandomLink(originRow, targetRow, now)
+  const backward = hangRandomLink(targetRow, originRow, now)
+
+  res.status(forward.link || backward.link ? 201 : 200).json({ forward, backward })
+})
+
+/** Remove links for good, each with the pin placements it had. */
+function deleteLinks(linkIds: string[]) {
+  const placeholders = linkIds.map(() => '?').join(',')
+  db.prepare(`DELETE FROM scene_link_angles WHERE link_id IN (${placeholders})`).run(...linkIds)
+  db.prepare(`DELETE FROM scene_links WHERE id IN (${placeholders})`).run(...linkIds)
+}
+
+/**
+ * Unjoin two scenes: every link between them goes, both ways, and with each the pin
+ * placements it had. The scenes themselves and their other exits stay as they are.
+ */
+scenesRouter.delete('/:id/connect/:targetId', (req, res) => {
+  const { id, targetId } = req.params
+  const rows = db
+    .prepare(
+      `SELECT id FROM scene_links
+       WHERE (from_scene_id = ? AND to_scene_id = ?) OR (from_scene_id = ? AND to_scene_id = ?)`,
+    )
+    .all(id, targetId, targetId, id) as { id: string }[]
+  if (rows.length === 0) {
+    res.status(404).json({ error: 'These scenes are not connected' })
+    return
+  }
+
+  const linkIds = rows.map((row) => row.id)
+  deleteLinks(linkIds)
+
+  res.json({ removedLinkIds: linkIds })
+})
+
+/**
+ * Link one view of this scene to a scene that already exists. One way only: the way back
+ * is a link of its own, made — or left out — from the other scene. `label` omitted names
+ * the link after the scene it leads to. Each view holds at most one exit, so a taken view
+ * is refused.
+ */
+scenesRouter.post('/:id/links/existing', (req, res) => {
+  const { targetSceneId, angleOffset, label } = req.body as {
+    targetSceneId?: string
+    angleOffset?: number
+    label?: string
+  }
+  if (!targetSceneId) {
+    res.status(400).json({ error: 'targetSceneId is required' })
+    return
+  }
+  if (targetSceneId === req.params.id) {
+    res.status(400).json({ error: 'Cannot link a scene to itself' })
+    return
+  }
+
+  const originRow = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
+  const targetRow = db.prepare('SELECT * FROM scenes WHERE id = ?').get(targetSceneId) as SceneRow | undefined
+  if (!originRow || !targetRow) {
+    res.status(404).json({ error: 'Scene not found' })
+    return
+  }
+  if (originRow.world_id !== targetRow.world_id) {
+    res.status(400).json({ error: 'Scenes belong to different worlds' })
+    return
+  }
+
+  const offset = parseAngleOffset(angleOffset)
+  if (offset === null) {
+    res.status(400).json({ error: 'angleOffset must be an integer' })
+    return
+  }
+  if (!sceneOffsets(originRow.id).includes(offset)) {
+    res.status(404).json({ error: 'Angle not found on this scene' })
+    return
+  }
+  if (linkAt(originRow.id, offset)) {
+    res.status(409).json({ error: 'This view already has a scene link' })
+    return
+  }
+
+  const id = randomUUID()
+  db.prepare(`
+    INSERT INTO scene_links (id, from_scene_id, to_scene_id, label, position_x, position_y, angle_offset, created_at)
+    VALUES (?, ?, ?, ?, 50, 50, ?, ?)
+  `).run(id, originRow.id, targetRow.id, label?.trim() || targetRow.name, offset, new Date().toISOString())
+
+  const row = db.prepare('SELECT * FROM scene_links WHERE id = ?').get(id) as SceneLinkRow
+  res.status(201).json(toSceneLink(row))
+})
+
+/**
  * Move a link's pin. On the base option at the link's own angle this moves the link
  * itself, which is where every option falls back to. In any other option it records a
  * placement override for just that view.
@@ -1019,6 +1173,21 @@ sceneLinksRouter.patch('/:id', (req, res) => {
   }
 
   res.json({ ...toSceneLink(existing), anglePositions: loadLinkAnglePositions(req.params.id) })
+})
+
+/**
+ * Remove one link, and only that one: a link back from the scene it led to is another
+ * link and stays, so the two scenes are then joined one way.
+ */
+sceneLinksRouter.delete('/:id', (req, res) => {
+  const existing = db.prepare('SELECT id FROM scene_links WHERE id = ?').get(req.params.id)
+  if (!existing) {
+    res.status(404).json({ error: 'Scene link not found' })
+    return
+  }
+
+  deleteLinks([req.params.id])
+  res.json({ removedLinkIds: [req.params.id] })
 })
 
 /**

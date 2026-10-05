@@ -72,6 +72,22 @@ export interface SceneLink {
 }
 
 /**
+ * How one end of a random connection came out: a link was `created`, the scene was
+ * already `linked` to the other one, or it was `full` — every view taken.
+ */
+export interface RandomLinkOutcome {
+  status: 'created' | 'linked' | 'full'
+  /** Set only when a link was created. */
+  link: SceneLink | null
+}
+
+/** Both ends of a random connection: `forward` leaves the scene it was started from. */
+export interface RandomConnection {
+  forward: RandomLinkOutcome
+  backward: RandomLinkOutcome
+}
+
+/**
  * The same scene at a later point on the world clock. `optionIndex` is its place in that
  * chain (1 is the first option after the scene's own image, which is index 0) and is
  * shared world-wide: option 2 of every scene turns over at the same minute.
