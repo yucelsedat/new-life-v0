@@ -29,6 +29,11 @@ export interface UseWorldEditorResult {
   changeViewImage: (optionKey: string, angleOffset: number, imageUrl: string) => Promise<void>
   goToScene: (sceneId: string) => Promise<void>
   moveLinkToAngle: (linkId: string, angleOffset: number) => Promise<void>
+  /**
+   * Remove one link of the scene on screen. A link back from where it led is another link
+   * and stays. Resolves to whether it went through.
+   */
+  deleteLink: (linkId: string) => Promise<boolean>
   updateLinkPosition: (
     linkId: string,
     optionKey: string,
@@ -360,6 +365,21 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     }
   }, [])
 
+  const deleteLink = useCallback(async (linkId: string) => {
+    setError(null)
+    try {
+      const response = await fetch(`/api/scene-links/${linkId}`, { method: 'DELETE' })
+      if (!response.ok) throw new Error(`Request failed: ${response.status}`)
+      setCurrentScene((prev) =>
+        prev ? { ...prev, links: (prev.links ?? []).filter((link) => link.id !== linkId) } : prev,
+      )
+      return true
+    } catch {
+      setError('delete-failed')
+      return false
+    }
+  }, [])
+
   /**
    * A pin dragged on the base option at the link's own angle moves the link everywhere it
    * has no placement of its own; dragged in any other option it only moves there.
@@ -417,6 +437,7 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
     changeViewImage,
     goToScene,
     moveLinkToAngle,
+    deleteLink,
     updateLinkPosition,
   }
 }

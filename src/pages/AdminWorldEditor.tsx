@@ -24,6 +24,7 @@ import StoryPickerModal from '../components/admin/StoryPickerModal'
 import AnglePickerModal from '../components/admin/AnglePickerModal'
 import OptionTimeField from '../components/admin/OptionTimeField'
 import LinkMoveMenu from '../components/admin/LinkMoveMenu'
+import DeleteConnectionModal from '../components/admin/DeleteConnectionModal'
 import { clamp } from '../utils/helpers'
 import { formatClock } from '../utils/worldClock'
 import { arrivalOffset, headingHour, ringHands, turnAngle } from '../utils/heading'
@@ -109,6 +110,7 @@ export default function AdminWorldEditor() {
     changeViewImage,
     goToScene,
     moveLinkToAngle,
+    deleteLink,
     updateLinkPosition,
   } = useWorldEditor(worldId ?? '')
   const { usedUrls, refetchUsed } = useUsedImages(worldId ?? '')
@@ -124,6 +126,9 @@ export default function AdminWorldEditor() {
   const [storyIndex, setStoryIndex] = useState(-1)
   const [storyModalOpen, setStoryModalOpen] = useState(false)
   const [angleModalOpen, setAngleModalOpen] = useState(false)
+  /** The link the delete dialog is open for. */
+  const [linkToDelete, setLinkToDelete] = useState<SceneLink | null>(null)
+  const [linkDeleteError, setLinkDeleteError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const backgroundRef = useRef<HTMLDivElement>(null)
 
@@ -208,6 +213,24 @@ export default function AdminWorldEditor() {
       await moveLinkToAngle(linkId, offset)
       // Follow the link to its new angle, where its pin is most likely to need placing.
       lookTowards(offset)
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  function closeLinkDelete() {
+    if (isSubmitting) return
+    setLinkToDelete(null)
+    setLinkDeleteError(null)
+  }
+
+  async function handleLinkDeleteConfirm() {
+    if (!linkToDelete) return
+    setIsSubmitting(true)
+    setLinkDeleteError(null)
+    try {
+      if (await deleteLink(linkToDelete.id)) setLinkToDelete(null)
+      else setLinkDeleteError(t.admin.disconnect.error)
     } finally {
       setIsSubmitting(false)
     }
@@ -305,7 +328,13 @@ export default function AdminWorldEditor() {
   // A and D turn the camera as the on-screen arrows do. A picker on top of the scene is
   // its own conversation, so the keys stay out of it until it closes.
   useAngleKeys({
-    enabled: storyIndex < 0 && modalMode === null && !storyModalOpen && !angleModalOpen && !isSubmitting,
+    enabled:
+      storyIndex < 0 &&
+      modalMode === null &&
+      !storyModalOpen &&
+      !angleModalOpen &&
+      linkToDelete === null &&
+      !isSubmitting,
     onLookLeft: () => leftOffset !== null && lookTowards(leftOffset),
     onLookRight: () => rightOffset !== null && lookTowards(rightOffset),
   })
@@ -319,6 +348,7 @@ export default function AdminWorldEditor() {
       modalMode === null &&
       !storyModalOpen &&
       !angleModalOpen &&
+      linkToDelete === null &&
       !isSubmitting,
     onFollowLink: () => followLink && followLinkTo(followLink.toSceneId),
   })
@@ -510,7 +540,7 @@ export default function AdminWorldEditor() {
             )}
 
             {/* Each view holds one link: an empty view offers to create it, a taken one
-                to move it onto another angle. */}
+                to move it onto another angle or to remove it. */}
             {viewLinks.length === 0 ? (
               <button
                 type="button"
@@ -521,14 +551,31 @@ export default function AdminWorldEditor() {
                 {t.admin.editor.createLinkButton}
               </button>
             ) : (
-              <LinkMoveMenu
-                links={viewLinks}
-                allLinks={currentScene.links ?? []}
-                views={optionViews}
-                currentOffset={angleOffset}
-                disabled={isSubmitting}
-                onMove={handleLinkMove}
-              />
+              <>
+                <LinkMoveMenu
+                  links={viewLinks}
+                  allLinks={currentScene.links ?? []}
+                  views={optionViews}
+                  currentOffset={angleOffset}
+                  disabled={isSubmitting}
+                  onMove={handleLinkMove}
+                />
+                {/* One button per link — a scene from before one-link-per-view names them apart. */}
+                {viewLinks.map((link) => (
+                  <button
+                    key={link.id}
+                    type="button"
+                    onClick={() => setLinkToDelete(link)}
+                    disabled={isSubmitting}
+                    className="flex items-center gap-2 rounded-full border border-white/15 bg-black/50 px-4 py-2 font-sans text-caption font-[700] text-white/60 backdrop-blur-md transition hover:border-red-400/60 hover:text-red-300 disabled:opacity-40"
+                  >
+                    <FiTrash2 className="h-3.5 w-3.5" />
+                    {viewLinks.length === 1
+                      ? t.admin.linkDelete.button
+                      : t.admin.linkDelete.buttonNamed.replace('{label}', link.label)}
+                  </button>
+                ))}
+              </>
             )}
 
             {/* Decides where someone walking in from another location ends up looking. A
@@ -617,6 +664,38 @@ export default function AdminWorldEditor() {
           </div>
         </div>
       )}
+
+      <DeleteConnectionModal
+        connection={
+          linkToDelete && currentScene
+            ? {
+                title: t.admin.disconnect.linkTitle,
+                question: t.admin.disconnect.linkQuestion
+                  .replace('{a}', currentScene.name)
+                  .replace('{b}', linkToDelete.toSceneName ?? linkToDelete.label),
+                links: [
+                  {
+                    id: linkToDelete.id,
+                    from: currentScene.name,
+                    to: linkToDelete.toSceneName ?? linkToDelete.label,
+                    label: linkToDelete.label,
+                  },
+                ],
+                // Only this scene's links are loaded here, so whether there is a way back is not known.
+                notes: [
+                  t.admin.disconnect.linkBackMayStay.replace(
+                    '{b}',
+                    linkToDelete.toSceneName ?? linkToDelete.label,
+                  ),
+                ],
+              }
+            : null
+        }
+        isDeleting={isSubmitting}
+        error={linkDeleteError}
+        onConfirm={handleLinkDeleteConfirm}
+        onCancel={closeLinkDelete}
+      />
 
       <AnglePickerModal
         open={angleModalOpen}
