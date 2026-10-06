@@ -1324,11 +1324,12 @@ export default function AdminWorldCanvas() {
   }
 
   /** Runs one change with the buttons held, then recounts the images the world has in use. */
-  async function submit(action: () => Promise<unknown>) {
+  async function submit<T>(action: () => Promise<T>): Promise<T> {
     setIsSubmitting(true)
     try {
-      await action()
+      const result = await action()
       await refetchUsed()
+      return result
     } finally {
       setIsSubmitting(false)
     }
@@ -1363,14 +1364,17 @@ export default function AdminWorldCanvas() {
     setPickerMode(null)
   }
 
-  async function handleAngleConfirm(imageUrl: string, heading: number, magnetic: boolean) {
-    if (!selectedScene) return
-    await submit(async () => {
+  async function handleAngleConfirm(imageUrl: string, heading: number, magnetic: boolean, keepOpen: boolean) {
+    if (!selectedScene) return false
+    const added = await submit(async () => {
       const angle = await createAngle(selectedScene.id, imageUrl, heading, magnetic)
       // Pick the angle that was just created, so it can be furnished right away.
       if (angle) setSelection({ sceneId: selectedScene.id, offset: angle.offset })
+      return angle !== null
     })
-    setAngleModalOpen(false)
+    // A refused angle leaves the modal up with what was picked, to try again.
+    if (added && !keepOpen) setAngleModalOpen(false)
+    return added
   }
 
   async function handleStoryConfirm(imageUrls: string[]) {
