@@ -8,7 +8,7 @@ import MagnetToggle from './MagnetToggle'
 import PickerGrid from './PickerGrid'
 import PickerUpload from './PickerUpload'
 import type { GalleryImage } from '../../types/world'
-import type { RingHand } from '../../utils/heading'
+import { HEADING_STEP, type RingHand } from '../../utils/heading'
 
 interface AnglePickerModalProps {
   open: boolean
@@ -19,7 +19,11 @@ interface AnglePickerModalProps {
   hiddenUrls?: string[]
   /** The hands already on this option's ring: its own image and its angles. */
   hands?: RingHand[]
-  onConfirm: (imageUrl: string, heading: number, magnetic: boolean) => void
+  /**
+   * Adds the angle and resolves to whether it went through. With `keepOpen` the modal
+   * stays up for the next one; a refused angle keeps it up either way, with what was picked.
+   */
+  onConfirm: (imageUrl: string, heading: number, magnetic: boolean, keepOpen: boolean) => Promise<boolean>
   onCancel: () => void
 }
 
@@ -59,26 +63,56 @@ export default function AnglePickerModal({
   /** Null until the hand is pointed somewhere — an angle cannot be added without it. */
   const [heading, setHeading] = useState<number | null>(null)
   const [magnetic, setMagnetic] = useState(false)
+  /** Whether the add under way is one that keeps the modal open, so its own button says so. */
+  const [keepingOpen, setKeepingOpen] = useState(false)
+  /** Angles added since the modal opened, by adding and carrying on. */
+  const [addedCount, setAddedCount] = useState(0)
+  const [failed, setFailed] = useState(false)
 
   const hiddenSet = new Set(hiddenUrls)
   const available = images.filter((image) => !hiddenSet.has(image.url))
+
+  // A guessed hand holds no mark of its own, so only the set ones use the ring up. An angle
+  // that takes the last free hour leaves the next one nowhere to point.
+  const freeMarks = 360 / HEADING_STEP - new Set(hands.filter((hand) => hand.isSet).map((hand) => hand.heading)).size
+  const canAddAnother = freeMarks > 1
 
   function reset() {
     setSelectedUrl(null)
     setHeading(null)
     setMagnetic(false)
+    setAddedCount(0)
+    setFailed(false)
   }
 
   function handleClose() {
+    if (isSubmitting) return
     reset()
     onCancel()
   }
 
-  function handleConfirm() {
+  async function handleConfirm(keepOpen: boolean) {
     if (!selectedUrl || heading === null) return
-    onConfirm(selectedUrl, heading, magnetic)
+    setKeepingOpen(keepOpen)
+    setFailed(false)
+    const added = await onConfirm(selectedUrl, heading, magnetic, keepOpen)
+    if (!added) {
+      setFailed(true)
+      return
+    }
+    // The image is used and the hour taken, so the next angle starts from nothing.
     reset()
+    if (keepOpen) setAddedCount(addedCount + 1)
   }
+
+  const canConfirm = selectedUrl !== null && heading !== null && !isSubmitting
+  const footnote = failed
+    ? t.admin.angle.failed
+    : addedCount > 0 && (selectedUrl === null || heading === null)
+      ? t.admin.angle.added.replace('{n}', String(addedCount))
+      : heading === null
+        ? t.admin.heading.required
+        : ''
 
   return (
     <AnimatePresence>
@@ -134,8 +168,8 @@ export default function AnglePickerModal({
             </div>
 
             <div className="flex items-center gap-3 border-t border-white/10 px-6 py-4">
-              <p className="flex-1 font-sans text-caption text-gold-bright/80">
-                {heading === null ? t.admin.heading.required : ''}
+              <p className={`flex-1 font-sans text-caption ${failed ? 'text-[#e0798f]' : 'text-gold-bright/80'}`}>
+                {footnote}
               </p>
               <button
                 type="button"
@@ -146,11 +180,20 @@ export default function AnglePickerModal({
               </button>
               <button
                 type="button"
-                onClick={handleConfirm}
-                disabled={!selectedUrl || heading === null || isSubmitting}
+                onClick={() => handleConfirm(true)}
+                disabled={!canConfirm || !canAddAnother}
+                title={canAddAnother ? undefined : t.admin.angle.ringFull}
+                className="rounded-xl border border-gold-bright/50 px-5 py-3 font-sans text-body font-[700] text-gold-bright transition hover:border-gold-bright hover:bg-gold-bright/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-gold-bright/50 disabled:hover:bg-transparent"
+              >
+                {isSubmitting && keepingOpen ? t.admin.editor.creating : t.admin.angle.confirmAndContinue}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleConfirm(false)}
+                disabled={!canConfirm}
                 className="rounded-xl bg-gradient-to-r from-gold to-gold-bright px-5 py-3 font-sans text-body font-[700] text-abyss transition disabled:cursor-not-allowed disabled:opacity-40"
               >
-                {isSubmitting ? t.admin.editor.creating : t.admin.angle.confirm}
+                {isSubmitting && !keepingOpen ? t.admin.editor.creating : t.admin.angle.confirm}
               </button>
             </div>
           </motion.div>

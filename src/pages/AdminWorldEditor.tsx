@@ -179,17 +179,20 @@ export default function AdminWorldEditor() {
     }
   }
 
-  async function handleAngleConfirm(imageUrl: string, heading: number, magnetic: boolean) {
+  async function handleAngleConfirm(imageUrl: string, heading: number, magnetic: boolean, keepOpen: boolean) {
     setIsSubmitting(true)
     try {
       const angle = await createAngle(activeOption, imageUrl, heading, magnetic)
+      // A refused angle leaves the modal up with what was picked, to try again.
+      if (!angle) return false
       // Land on the angle that was just created, so it can be furnished right away.
-      if (angle) setAngleOffset(angle.offset)
+      setAngleOffset(angle.offset)
       setStoryIndex(-1)
       await refetchUsed()
+      if (!keepOpen) setAngleModalOpen(false)
+      return true
     } finally {
       setIsSubmitting(false)
-      setAngleModalOpen(false)
     }
   }
 
