@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { LuMagnet } from 'react-icons/lu'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   FiArrowLeft,
   FiArrowRight,
@@ -96,6 +96,9 @@ function ScenePin({ link, title, position, containerRef, onDragEnd, onNavigate }
 export default function AdminWorldEditor() {
   const t = useT()
   const { worldId } = useParams<{ worldId: string }>()
+  // The canvas opens a location here as `?scene=<id>&angle=<offset>`.
+  const [searchParams] = useSearchParams()
+  const openSceneId = searchParams.get('scene')
   const {
     scenes,
     currentScene,
@@ -112,7 +115,7 @@ export default function AdminWorldEditor() {
     moveLinkToAngle,
     deleteLink,
     updateLinkPosition,
-  } = useWorldEditor(worldId ?? '')
+  } = useWorldEditor(worldId ?? '', openSceneId)
   const { usedUrls, refetchUsed } = useUsedImages(worldId ?? '')
   const { timeFor, setOptionTime } = useWorldOptionTimes(worldId ?? '')
 
@@ -146,6 +149,11 @@ export default function AdminWorldEditor() {
    * nobody is on the way anywhere.
    */
   const [travelHeading, setTravelHeading] = useState<number | null | undefined>(undefined)
+  /** The view the location opened from the canvas starts on, until that location has shown. */
+  const [openOffset, setOpenOffset] = useState<number | null>(() => {
+    const offset = Number(searchParams.get('angle'))
+    return openSceneId && Number.isInteger(offset) ? offset : null
+  })
 
   // Arriving at a location picks the view to open on — as the game does — on its base
   // option. Adjusted while rendering rather than in an effect, so the location never
@@ -155,15 +163,15 @@ export default function AdminWorldEditor() {
   if (shownSceneId !== currentSceneId) {
     setShownSceneId(currentSceneId)
     setTravelHeading(undefined)
+    setOpenOffset(null)
     setActiveOption('base')
-    setAngleOffset(
-      currentScene && travelHeading !== undefined
-        ? arrivalOffset(
-            travelHeading,
-            ringHands(currentScene.heading, currentScene.angles?.base ?? [], currentScene.magnetic),
-          )
-        : 0,
-    )
+    const hands = currentScene
+      ? ringHands(currentScene.heading, currentScene.angles?.base ?? [], currentScene.magnetic)
+      : []
+    // A view that has gone from the ring since the canvas picked it opens on the option image.
+    const opensHere =
+      openOffset !== null && currentSceneId === openSceneId && hands.some((hand) => hand.offset === openOffset)
+    setAngleOffset(travelHeading !== undefined ? arrivalOffset(travelHeading, hands) : opensHere ? openOffset : 0)
     setStoryIndex(-1)
   }
 

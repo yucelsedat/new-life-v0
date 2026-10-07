@@ -105,3 +105,16 @@ export function arrivalOffset(heading: number | null, hands: RingHand[]): number
 
   return known.find((hand) => hand.heading === heading)?.offset ?? 0
 }
+
+/**
+ * The view the editor opens a location on when it is picked on the canvas. A location
+ * with magnetic views opens on one of them — the one nearest the view picked on its
+ * ring, as if walking in facing that way. With none it opens on the picked view itself.
+ */
+export function openingOffset(offset: number, hands: RingHand[]): number {
+  if (!hands.some((hand) => hand.isSet && hand.magnetic)) return offset
+  const picked = hands.find((hand) => hand.offset === offset)
+  // A picked view with no heading on record is read as facing the way the option image does.
+  const facing = picked?.isSet ? picked.heading : (hands.find((hand) => hand.offset === 0)?.heading ?? 0)
+  return arrivalOffset(facing, hands)
+}

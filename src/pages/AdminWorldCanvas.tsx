@@ -16,6 +16,7 @@ import {
   FiBookOpen,
   FiCompass,
   FiCopy,
+  FiEdit3,
   FiImage,
   FiLink,
   FiMinus,
@@ -36,7 +37,14 @@ import LinkMoveMenu from '../components/admin/LinkMoveMenu'
 import DeleteConnectionModal, { type ConnectionToDelete } from '../components/admin/DeleteConnectionModal'
 import { DialFace, DialHand } from '../components/admin/HeadingDial'
 import { clamp } from '../utils/helpers'
-import { headingHour, headingTowards, headingVector, ringHands, type RingHand } from '../utils/heading'
+import {
+  headingHour,
+  headingTowards,
+  headingVector,
+  openingOffset,
+  ringHands,
+  type RingHand,
+} from '../utils/heading'
 import { viewKey } from '../types/world'
 import type { RandomLinkOutcome, SceneLink, WorldScene } from '../types/world'
 
@@ -577,6 +585,8 @@ interface SelectionPanelProps {
   canLink: boolean
   isSubmitting: boolean
   notices: LinkNotice[]
+  /** The editor, opened on this scene. */
+  editorHref: string
   onPickView: (offset: number) => void
   /** Link the view at `offset` to a scene that already exists — the next ring clicked. */
   onAddLink: (offset: number) => void
@@ -607,6 +617,7 @@ function SelectionPanel({
   canLink,
   isSubmitting,
   notices,
+  editorHref,
   onPickView,
   onAddLink,
   onDeleteLink,
@@ -671,15 +682,25 @@ function SelectionPanel({
           </span>
           <h3 className="truncate font-display text-h2 font-[300] text-white/95">{scene.name}</h3>
         </div>
-        <button
-          type="button"
-          onClick={onDeselect}
-          aria-label={t.admin.canvas.deselect}
-          title={t.admin.canvas.deselect}
-          className="shrink-0 text-white/50 transition hover:text-white"
-        >
-          <FiX className="h-4 w-4" />
-        </button>
+        <div className="flex shrink-0 items-center gap-3">
+          <Link
+            to={editorHref}
+            title={t.admin.canvas.openInEditorTitle}
+            className="flex items-center gap-1.5 rounded-full border border-white/15 bg-black/50 px-3 py-1.5 font-sans text-caption font-[700] text-white/80 transition hover:border-gold-bright hover:text-gold-bright"
+          >
+            <FiEdit3 className="h-3.5 w-3.5" />
+            {t.admin.canvas.openInEditor}
+          </Link>
+          <button
+            type="button"
+            onClick={onDeselect}
+            aria-label={t.admin.canvas.deselect}
+            title={t.admin.canvas.deselect}
+            className="text-white/50 transition hover:text-white"
+          >
+            <FiX className="h-4 w-4" />
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-2">
@@ -1575,6 +1596,7 @@ export default function AdminWorldCanvas() {
             canLink={scenes.length > 1}
             isSubmitting={isSubmitting}
             notices={notices}
+            editorHref={`/admin/worlds/${worldId}?scene=${selectedScene.id}&angle=${openingOffset(selectedOffset, selectedHands)}`}
             onLink={() => {
               setNotices([])
               setConnect({ sourceId: selectedScene.id, kind: 'random', offset: 0 })
