@@ -54,7 +54,8 @@ async function fetchScene(sceneId: string): Promise<WorldScene> {
   return (await response.json()) as WorldScene
 }
 
-export function useWorldEditor(worldId: string): UseWorldEditorResult {
+/** `openSceneId` is the scene to start on, when it is one of the world's; otherwise the first. */
+export function useWorldEditor(worldId: string, openSceneId?: string | null): UseWorldEditorResult {
   const [scenes, setScenes] = useState<WorldScene[]>([])
   const [currentScene, setCurrentScene] = useState<WorldScene | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -71,8 +72,8 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
         setScenes(list)
 
         if (list.length > 0) {
-          const first = await fetchScene(list[0].id)
-          setCurrentScene(first)
+          const opening = list.find((scene) => scene.id === openSceneId) ?? list[0]
+          setCurrentScene(await fetchScene(opening.id))
         }
       } catch (err) {
         if ((err as Error).name === 'AbortError') return
@@ -84,7 +85,7 @@ export function useWorldEditor(worldId: string): UseWorldEditorResult {
 
     load()
     return () => controller.abort()
-  }, [worldId])
+  }, [worldId, openSceneId])
 
   const createFirstScene = useCallback(
     async (name: string, imageUrl: string, heading: number, magnetic: boolean) => {

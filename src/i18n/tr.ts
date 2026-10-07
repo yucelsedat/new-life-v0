@@ -198,6 +198,8 @@ export const tr = {
       cancel: 'Vazgeç',
       selectedLabel: 'Seçili Konum',
       deselect: 'Seçimi kaldır',
+      openInEditor: 'Editörde Aç',
+      openInEditorTitle: 'Konumu editörde aç: manyetik açısı varsa seçili açıya en yakın olanında açılır.',
       viewsTitle: 'Açılar ve konum linkleri',
       viewActions: '{view} açısı',
       viewPick: 'Butonlar bu açı için çalışsın',
