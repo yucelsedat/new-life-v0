@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { viewKey } from '../types/world'
 import type { SceneAngle, SceneLink, SceneVariant, StoryFrame, WorldScene } from '../types/world'
+import { canvasPosition, spotBeyond } from '../utils/canvasLayout'
 
 export interface UseWorldEditorResult {
   scenes: WorldScene[]
@@ -109,17 +110,29 @@ export function useWorldEditor(worldId: string, openSceneId?: string | null): Us
 
   /**
    * A new scene reached from the view on screen — `angleOffset` is the angle it hangs
-   * off; `heading` and `magnetic` describe the new scene's own image.
+   * off; `heading` and `magnetic` describe the new scene's own image. Its ring goes on
+   * the canvas out that way from this scene's.
    */
   const createLink = useCallback(
     async (label: string, imageUrl: string, angleOffset: number, heading: number, magnetic: boolean) => {
       if (!currentScene) return
       setError(null)
+      const rings = scenes.map(canvasPosition)
+      const origin = rings[scenes.findIndex((scene) => scene.id === currentScene.id)]
+      const spot = origin ? spotBeyond(origin, heading, rings) : null
       try {
         const response = await fetch(`/api/scenes/${currentScene.id}/links`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ label, imageUrl, angleOffset, heading, magnetic }),
+          body: JSON.stringify({
+            label,
+            imageUrl,
+            angleOffset,
+            heading,
+            magnetic,
+            canvasX: spot?.x,
+            canvasY: spot?.y,
+          }),
         })
         if (!response.ok) throw new Error(`Request failed: ${response.status}`)
         const { scene, link } = (await response.json()) as { scene: WorldScene; link: SceneLink }
@@ -129,7 +142,7 @@ export function useWorldEditor(worldId: string, openSceneId?: string | null): Us
         setError('create-failed')
       }
     },
-    [currentScene],
+    [currentScene, scenes],
   )
 
   const createVariant = useCallback(

@@ -197,23 +197,17 @@ export function useWorldCanvas(worldId: string): UseWorldCanvasResult {
 
   const createLinkedScene = useCallback<UseWorldCanvasResult['createLinkedScene']>(
     async (sceneId, angleOffset, { name, imageUrl, heading, magnetic, canvasX, canvasY }) => {
-      setError(null)
-      const created = await send<{ scene: WorldScene }>(`/api/scenes/${sceneId}/links`, 'POST', {
+      await change('create-failed', `/api/scenes/${sceneId}/links`, 'POST', {
         label: name,
         imageUrl,
         angleOffset,
         heading,
         magnetic,
+        canvasX,
+        canvasY,
       })
-      if (!created) {
-        setError('create-failed')
-        return
-      }
-      // The link route knows nothing of the canvas; without this the ring lands on the fallback grid.
-      await send(`/api/scenes/${created.scene.id}/position`, 'PATCH', { canvasX, canvasY })
-      await fetchGraph()
     },
-    [fetchGraph],
+    [change],
   )
 
   const createVariant = useCallback(
