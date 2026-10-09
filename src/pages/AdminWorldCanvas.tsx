@@ -37,6 +37,7 @@ import LinkMoveMenu from '../components/admin/LinkMoveMenu'
 import DeleteConnectionModal, { type ConnectionToDelete } from '../components/admin/DeleteConnectionModal'
 import { DialFace, DialHand } from '../components/admin/HeadingDial'
 import { clamp } from '../utils/helpers'
+import { RING_R, canvasPosition, spotBeyond, type Vec2 } from '../utils/canvasLayout'
 import {
   headingHour,
   headingTowards,
@@ -48,8 +49,6 @@ import {
 import { viewKey } from '../types/world'
 import type { RandomLinkOutcome, SceneLink, WorldScene } from '../types/world'
 
-/** Radius of a scene's angle ring, in canvas units. */
-const RING_R = 68
 const HAND_LENGTH = RING_R - 14
 /** Width of the image a hand shows on hover, in screen pixels — it does not shrink with the zoom. */
 const PREVIEW_W = 360
@@ -57,10 +56,6 @@ const PREVIEW_W = 360
 const PREVIEW_MARGIN = 12
 /** The clear space kept between a ring's rim and the image, in screen pixels. */
 const PREVIEW_GAP = 12
-/** How far from its origin's centre a newly linked scene's ring is put, in canvas units. */
-const LINK_REACH = 260
-/** The least distance kept between that ring's centre and any other's. */
-const RING_CLEARANCE = RING_R * 2 + 24
 /** The length and half-width of a connection line's arrowhead, in canvas units. */
 const ARROW_LENGTH = 13
 const ARROW_HALF_WIDTH = 6
@@ -73,17 +68,6 @@ const NAME_BOTTOM = NAME_TOP + 26
 const EDGE_HIT_WIDTH = 16
 const MIN_ZOOM = 0.3
 const MAX_ZOOM = 2
-
-interface Vec2 {
-  x: number
-  y: number
-}
-
-function fallbackPosition(index: number): Vec2 {
-  const col = index % 4
-  const row = Math.floor(index / 4)
-  return { x: 140 + col * 260, y: 140 + row * 220 }
-}
 
 /**
  * Where the centre of a `width` × `height` box sits, relative to a ring's centre, when it
@@ -123,20 +107,6 @@ function overrun(left: number, top: number, width: number, height: number): numb
 interface PositionedScene extends WorldScene {
   px: number
   py: number
-}
-
-/**
- * Where the ring of a scene newly linked from `origin` goes: out along the view the link
- * hangs off, so the canvas reads the way the scenes lie — and further out still while
- * another ring is already there.
- */
-function spotBeyond(origin: PositionedScene, heading: number, scenes: PositionedScene[]): Vec2 {
-  const { x, y } = headingVector(heading)
-  let spot = { x: origin.px + x * LINK_REACH, y: origin.py + y * LINK_REACH }
-  while (scenes.some((scene) => Math.hypot(scene.px - spot.x, scene.py - spot.y) < RING_CLEARANCE)) {
-    spot = { x: spot.x + x * RING_CLEARANCE, y: spot.y + y * RING_CLEARANCE }
-  }
-  return spot
 }
 
 /** A ring hand together with the image it stands for. `angleId` null is the scene's own image. */
@@ -1053,12 +1023,8 @@ export default function AdminWorldCanvas() {
   const positionedScenes = useMemo<PositionedScene[]>(
     () =>
       scenes.map((scene, index) => {
-        const fallback = fallbackPosition(index)
-        return {
-          ...scene,
-          px: scene.canvasX ?? fallback.x,
-          py: scene.canvasY ?? fallback.y,
-        }
+        const { x, y } = canvasPosition(scene, index)
+        return { ...scene, px: x, py: y }
       }),
     [scenes],
   )
@@ -1366,8 +1332,11 @@ export default function AdminWorldCanvas() {
       } else if (!selectedScene) {
         return
       } else if (pickerMode === 'create-link') {
-        const hand = selectedHands.find((item) => item.offset === selectedOffset)
-        const spot = spotBeyond(selectedScene, hand?.heading ?? selectedScene.heading, positionedScenes)
+        const spot = spotBeyond(
+          { x: selectedScene.px, y: selectedScene.py },
+          heading,
+          positionedScenes.map((scene) => ({ x: scene.px, y: scene.py })),
+        )
         await createLinkedScene(selectedScene.id, selectedOffset, {
           name,
           imageUrl,

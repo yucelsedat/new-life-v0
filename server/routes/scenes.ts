@@ -839,9 +839,10 @@ scenesRouter.patch('/:id/position', (req, res) => {
 /**
  * Create a new scene and link to it from one view of this one. `angleOffset` omitted
  * means the option image. Each view holds at most one exit, so a taken view is refused.
+ * `canvasX` and `canvasY` are where the new scene's ring goes on the canvas.
  */
 scenesRouter.post('/:id/links', (req, res) => {
-  const { label, imageUrl, positionX, positionY, angleOffset, heading, magnetic } = req.body as {
+  const { label, imageUrl, positionX, positionY, angleOffset, heading, magnetic, canvasX, canvasY } = req.body as {
     label?: string
     imageUrl?: string
     positionX?: number
@@ -849,6 +850,8 @@ scenesRouter.post('/:id/links', (req, res) => {
     angleOffset?: number
     heading?: number
     magnetic?: boolean
+    canvasX?: number
+    canvasY?: number
   }
   if (!label || !imageUrl) {
     res.status(400).json({ error: 'label and imageUrl are required' })
@@ -886,8 +889,19 @@ scenesRouter.post('/:id/links', (req, res) => {
 
   const targetId = randomUUID()
   db.prepare(
-    'INSERT INTO scenes (id, world_id, name, image_url, created_at, heading, magnetic) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  ).run(targetId, originRow.world_id, label, imageUrl, now, targetHeading, magnetic === true ? 1 : 0)
+    `INSERT INTO scenes (id, world_id, name, image_url, created_at, canvas_x, canvas_y, heading, magnetic)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    targetId,
+    originRow.world_id,
+    label,
+    imageUrl,
+    now,
+    canvasX ?? null,
+    canvasY ?? null,
+    targetHeading,
+    magnetic === true ? 1 : 0,
+  )
 
   const forwardId = randomUUID()
   db.prepare(`
