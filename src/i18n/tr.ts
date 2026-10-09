@@ -74,6 +74,19 @@ export const tr = {
       saving: 'Kaydediliyor…',
       updateError: 'Güncelleme başarısız oldu.',
       deleteButton: 'Sil',
+      optionsButton: 'Seçenekler',
+      duplicateButton: 'Çoğalt',
+    },
+    duplicateWorld: {
+      title: 'Dünyayı Çoğalt',
+      description:
+        '"{name}" dünyası sahneleri, seçenekleri, açıları, linkleri, hikayeleri ve notlarıyla birlikte yeni bir dünya olarak kopyalanacak.',
+      nameLabel: 'Kopyanın Adı',
+      defaultName: '{name} (Kopya)',
+      confirm: 'Kopyayı Oluştur',
+      cancel: 'Vazgeç',
+      duplicating: 'Kopyalanıyor…',
+      error: 'Kopyalama başarısız oldu. Lütfen tekrar deneyin.',
     },
     deleteWorld: {
       title: 'Dünyayı Sil',
