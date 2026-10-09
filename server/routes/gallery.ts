@@ -66,22 +66,37 @@ function toImage(row: ImageRow, inUse = false) {
 /**
  * Every place an image URL can be consumed. One definition serves both the `inUse`
  * flag the library shows and the deletion guard — a used image must never be removed.
- * `urlExpr` is the SQL expression holding the URL: a `?` placeholder when checking one
- * image, or `images.url` when correlating with the row being listed.
+ * `urlExpr` is the SQL expression holding the URL: a named parameter when checking one
+ * image, or `images.url` when correlating with the row being listed. `worldExpr`, given
+ * the same way, counts only what that one world consumes.
  */
-function imageUsageSql(urlExpr: '?' | 'images.url'): string {
+function imageUsageSql(urlExpr: ':url' | 'images.url', worldExpr?: ':world' | 'images.world_id'): string {
+  const ofWorld = worldExpr ? ` AND scene_id IN (SELECT id FROM scenes WHERE world_id = ${worldExpr})` : ''
   return `
-    SELECT 1 FROM scenes WHERE image_url = ${urlExpr}
+    SELECT 1 FROM scenes WHERE image_url = ${urlExpr}${worldExpr ? ` AND world_id = ${worldExpr}` : ''}
     UNION ALL
-    SELECT 1 FROM scene_variants WHERE image_url = ${urlExpr}
+    SELECT 1 FROM scene_variants WHERE image_url = ${urlExpr}${ofWorld}
     UNION ALL
-    SELECT 1 FROM scene_angles WHERE image_url = ${urlExpr}
+    SELECT 1 FROM scene_angles WHERE image_url = ${urlExpr}${ofWorld}
     UNION ALL
-    SELECT 1 FROM story_frames WHERE image_url = ${urlExpr}
+    SELECT 1 FROM story_frames WHERE image_url = ${urlExpr}${ofWorld}
     UNION ALL
-    SELECT 1 FROM worlds WHERE scene_image_url = ${urlExpr}
+    SELECT 1 FROM worlds WHERE scene_image_url = ${urlExpr}${worldExpr ? ` AND id = ${worldExpr}` : ''}
   `
 }
+
+/**
+ * Whether the record being listed is in use. A world's image answers for that world
+ * alone: a duplicated world has its own records for the files it shares with its source,
+ * and what the source still shows must not pin an image the copy has let go of. An image
+ * of the global library belongs to no world, so any use anywhere counts.
+ */
+const LISTED_IMAGE_IN_USE_SQL = `
+  CASE WHEN images.world_id IS NULL
+    THEN EXISTS(${imageUsageSql('images.url')})
+    ELSE EXISTS(${imageUsageSql('images.url', 'images.world_id')})
+  END
+`
 
 /**
  * Scope rules:
@@ -116,7 +131,7 @@ galleryRouter.get('/', (req, res) => {
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
   const rows = db
     .prepare(
-      `SELECT images.*, EXISTS(${imageUsageSql('images.url')}) AS in_use
+      `SELECT images.*, ${LISTED_IMAGE_IN_USE_SQL} AS in_use
        FROM images ${where} ORDER BY uploaded_at DESC`,
     )
     .all(...params) as (ImageRow & { in_use: number })[]
@@ -175,12 +190,16 @@ galleryRouter.post('/', (req, res) => {
   })
 })
 
+// Parameters are named, so adding a new place an image can be used never silently
+// breaks the binding.
 function isUrlInUse(url: string): boolean {
-  const sql = `${imageUsageSql('?')} LIMIT 1`
-  // One placeholder per branch of the union — bound from the SQL itself so adding a
-  // new place an image can be used never silently breaks the parameter count.
-  const params = Array<string>(sql.split('?').length - 1).fill(url)
-  const hit = db.prepare(sql).get(...params)
+  return db.prepare(`${imageUsageSql(':url')} LIMIT 1`).get({ url }) !== undefined
+}
+
+/** The single-record form of the listing's rule: a world's image answers for its own world. */
+function isImageInUse(image: Pick<ImageRow, 'url' | 'world_id'>): boolean {
+  if (image.world_id === null) return isUrlInUse(image.url)
+  const hit = db.prepare(`${imageUsageSql(':url', ':world')} LIMIT 1`).get({ url: image.url, world: image.world_id })
   return hit !== undefined
 }
 
@@ -198,12 +217,13 @@ galleryRouter.delete('/', (req, res) => {
 
   const placeholders = ids.map(() => '?').join(',')
   const rows = db
-    .prepare(`SELECT id, filename, original_name, url FROM images WHERE id IN (${placeholders})`)
-    .all(...(ids as string[])) as Pick<ImageRow, 'id' | 'filename' | 'original_name' | 'url'>[]
+    .prepare(`SELECT id, filename, original_name, url, world_id FROM images WHERE id IN (${placeholders})`)
+    .all(...(ids as string[])) as Pick<ImageRow, 'id' | 'filename' | 'original_name' | 'url' | 'world_id'>[]
 
-  const deletable = rows.filter((row) => !isUrlInUse(row.url))
+  const inUseIds = new Set(rows.filter(isImageInUse).map((row) => row.id))
+  const deletable = rows.filter((row) => !inUseIds.has(row.id))
   const skipped = rows
-    .filter((row) => isUrlInUse(row.url))
+    .filter((row) => inUseIds.has(row.id))
     .map((row) => ({ id: row.id, originalName: row.original_name }))
 
   if (deletable.length) {
@@ -212,10 +232,11 @@ galleryRouter.delete('/', (req, res) => {
   }
 
   // The same upload can back several image records (another world, the global library),
-  // so a file only goes once nothing points at it anymore.
+  // so a file only goes once nothing points at it anymore — neither a record nor,
+  // should a world show an image it holds no record for, the game itself.
   const stillReferenced = db.prepare('SELECT 1 FROM images WHERE filename = ? LIMIT 1')
   for (const row of deletable) {
-    if (stillReferenced.get(row.filename)) continue
+    if (stillReferenced.get(row.filename) || isUrlInUse(row.url)) continue
     try {
       rmSync(join(uploadsDir, row.filename))
     } catch {

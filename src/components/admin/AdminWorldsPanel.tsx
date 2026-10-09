@@ -1,12 +1,14 @@
 import { useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { FiCheck, FiEdit2, FiEdit3, FiImage, FiTrash2, FiX } from 'react-icons/fi'
+import { FiCheck, FiEdit2, FiEdit3, FiImage, FiX } from 'react-icons/fi'
 import type { SceneId, World } from '../../types/world'
 import { useWorlds } from '../../hooks/useWorlds'
 import { useT } from '../../i18n'
 import { SCENE_IDS, SCENE_PALETTES } from '../../utils/constants'
 import { formatPlayTime, formatProgress, formatRelativeDate } from '../../utils/helpers'
 import DeleteWorldModal from './DeleteWorldModal'
+import DuplicateWorldModal from './DuplicateWorldModal'
+import WorldActionsMenu from './WorldActionsMenu'
 
 async function createWorld(name: string, sceneId: SceneId, sceneLabel: string): Promise<World> {
   const response = await fetch('/api/worlds', {
@@ -20,8 +22,6 @@ async function createWorld(name: string, sceneId: SceneId, sceneLabel: string): 
 
 const ACTION_BUTTON =
   'flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 text-white/70 transition hover:border-gold-bright hover:text-gold-bright'
-const DANGER_BUTTON =
-  'flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 text-white/70 transition hover:border-[#e0798f] hover:text-[#e0798f]'
 
 async function updateWorld(id: string, name: string, sceneId: SceneId, sceneLabel: string): Promise<void> {
   const response = await fetch(`/api/worlds/${id}`, {
@@ -47,6 +47,7 @@ export default function AdminWorldsPanel() {
   const [isSavingRow, setIsSavingRow] = useState(false)
   const [rowError, setRowError] = useState<string | null>(null)
   const [deletingWorldId, setDeletingWorldId] = useState<string | null>(null)
+  const [duplicatingWorld, setDuplicatingWorld] = useState<World | null>(null)
 
   function startEditing(world: World) {
     setEditingId(world.id)
@@ -281,15 +282,10 @@ export default function AdminWorldsPanel() {
                           >
                             <FiEdit3 className="h-3.5 w-3.5" />
                           </Link>
-                          <button
-                            type="button"
-                            onClick={() => setDeletingWorldId(world.id)}
-                            title={t.admin.worlds.deleteButton}
-                            aria-label={t.admin.worlds.deleteButton}
-                            className={DANGER_BUTTON}
-                          >
-                            <FiTrash2 className="h-3.5 w-3.5" />
-                          </button>
+                          <WorldActionsMenu
+                            onDuplicate={() => setDuplicatingWorld(world)}
+                            onDelete={() => setDeletingWorldId(world.id)}
+                          />
                         </div>
                       )}
                     </td>
@@ -306,6 +302,11 @@ export default function AdminWorldsPanel() {
         worldId={deletingWorldId}
         onClose={() => setDeletingWorldId(null)}
         onDeleted={refetch}
+      />
+      <DuplicateWorldModal
+        world={duplicatingWorld}
+        onClose={() => setDuplicatingWorld(null)}
+        onDuplicated={refetch}
       />
     </div>
   )
