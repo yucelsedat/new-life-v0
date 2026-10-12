@@ -165,6 +165,15 @@ try {
   // column already exists
 }
 
+// Stories gained a trigger time: a story with one plays by itself once the world clock
+// reaches that minute on its view. Every frame of a story carries the same value; null
+// is a story that waits for the player to start it.
+try {
+  db.exec(`ALTER TABLE story_frames ADD COLUMN trigger_minute INTEGER`)
+} catch {
+  // column already exists
+}
+
 // Links gained an angle: each view of a scene — the option image and every angle —
 // holds at most one exit, so a link now names the angle it is drawn on. It is the
 // same angle across every option. Links written before this sat on the option image.

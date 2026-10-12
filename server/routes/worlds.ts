@@ -207,8 +207,8 @@ worldsRouter.post('/:id/duplicate', (req, res) => {
     }
 
     const insertFrame = db.prepare(`
-      INSERT INTO story_frames (id, scene_id, variant_id, angle_offset, image_url, position, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO story_frames (id, scene_id, variant_id, angle_offset, image_url, position, trigger_minute, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
     for (const frame of ofScenes('story_frames')) {
       const variantId = mapVariant(frame.variant_id as string | null)
@@ -220,6 +220,7 @@ worldsRouter.post('/:id/duplicate', (req, res) => {
         frame.angle_offset,
         frame.image_url,
         frame.position,
+        frame.trigger_minute ?? null,
         frame.created_at,
       )
     }

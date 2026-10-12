@@ -1,14 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { FiArrowLeft, FiArrowRight, FiClock } from 'react-icons/fi'
 import { useWorldEditor } from '../hooks/useWorldEditor'
 import { useWorldClock } from '../hooks/useWorldClock'
 import { useAngleKeys } from '../hooks/useAngleKeys'
 import { useLinkKey } from '../hooks/useLinkKey'
+import { useStoryKey } from '../hooks/useStoryKey'
+import { useHoldZoom } from '../hooks/useHoldZoom'
 import { useWorldOptionTimes } from '../hooks/useWorldOptionTimes'
-import { activeOptionIndex, formatClock, minuteOfDayFor } from '../utils/worldClock'
+import { MINUTES_PER_DAY, activeOptionIndex, formatClock, minuteOfDayFor, startMinute } from '../utils/worldClock'
 import { arrivalOffset, ringHands, turnAngle } from '../utils/heading'
-import { viewKey } from '../types/world'
+import { storyTriggerMinute, viewKey } from '../types/world'
 import type { SceneLink } from '../types/world'
 
 function ScenePinButton({
@@ -41,16 +43,22 @@ export default function Game() {
   const { currentScene, isLoading, scenes, goToScene } = useWorldEditor(worldId ?? '')
   const { optionTimes } = useWorldOptionTimes(worldId ?? '')
 
+  /** -1 = showing the view image; 0..n-1 = a story frame of the active view. */
+  const [storyIndex, setStoryIndex] = useState(-1)
+  /**
+   * The timed stories that have already played, as `<scene>|<view>` — each plays once,
+   * however often the player comes back to its view afterwards.
+   */
+  const [playedStories, setPlayedStories] = useState<ReadonlySet<string>>(() => new Set())
+
   // The world runs on its own clock; how far it has got decides which version of every
-  // scene is standing, so the whole world moves on together.
-  const elapsedMinutes = useWorldClock()
+  // scene is standing, so the whole world moves on together. It holds still while a
+  // story is on screen, so the world cannot turn over under it mid-scene.
+  const elapsedMinutes = useWorldClock(storyIndex < 0)
   const clock = formatClock(minuteOfDayFor(optionTimes, elapsedMinutes))
   const worldOptionIndex = activeOptionIndex(optionTimes, elapsedMinutes)
 
   const currentSceneId = currentScene?.id
-
-  /** -1 = showing the view image; 0..n-1 = a story frame of the active view. */
-  const [storyIndex, setStoryIndex] = useState(-1)
   /** Which way the player has turned within the active option. 0 = the option image. */
   const [angleOffset, setAngleOffset] = useState(0)
 
@@ -90,7 +98,8 @@ export default function Game() {
   // new location never shows for a frame at the view left over from the last one.
   const activeOptionKey = activeOption?.key
   const [shown, setShown] = useState({ sceneId: currentSceneId, optionKey: activeOptionKey })
-  if (shown.sceneId !== currentSceneId || shown.optionKey !== activeOptionKey) {
+  const viewChanging = shown.sceneId !== currentSceneId || shown.optionKey !== activeOptionKey
+  if (viewChanging) {
     const arrived = shown.sceneId !== currentSceneId
     setShown({ sceneId: currentSceneId, optionKey: activeOptionKey })
     setStoryIndex(-1)
@@ -105,9 +114,36 @@ export default function Game() {
 
   const currentViewKey = activeOption ? viewKey(activeOption.key, angleOffset) : null
   const storyFrames = currentViewKey ? (currentScene?.stories?.[currentViewKey] ?? []) : []
-  const canAdvance = storyFrames.length > 0 && storyIndex < storyFrames.length - 1
-  // With a story configured, the exits only appear once the player reaches its last frame.
-  const showLinks = storyFrames.length === 0 ? storyIndex < 0 : storyIndex === storyFrames.length - 1
+  const storyTrigger = storyTriggerMinute(storyFrames)
+  const isTimedStory = storyTrigger !== null
+  const isLastFrame = storyIndex === storyFrames.length - 1
+
+  // A timed story plays by itself once the clock has reached its minute — the moment the
+  // player is on its view then, or the moment they turn to it later. Its minute is read
+  // against the opening minute, as option times are, so one set before it falls on the
+  // next day. Started while rendering, so the view never shows for a frame without it.
+  const storyKey = currentSceneId && currentViewKey ? `${currentSceneId}|${currentViewKey}` : null
+  const storyDue =
+    isTimedStory &&
+    storyKey !== null &&
+    !playedStories.has(storyKey) &&
+    elapsedMinutes >= (storyTrigger - startMinute(optionTimes) + MINUTES_PER_DAY) % MINUTES_PER_DAY
+  if (!viewChanging && storyDue && storyIndex < 0) {
+    setStoryIndex(0)
+    setPlayedStories((prev) => new Set(prev).add(storyKey))
+  }
+
+  // A story the player starts runs up to its last frame and stays there with the exits;
+  // a timed one is not theirs to start, and its last step hands the view back.
+  const canAdvance =
+    storyIndex >= 0 ? !isLastFrame || isTimedStory : !isTimedStory && storyFrames.length > 0
+  // With a story the player starts, the exits only appear once they reach its last
+  // frame. A timed story keeps them hidden while it plays and leaves the view as it was.
+  const showLinks = isTimedStory || storyFrames.length === 0 ? storyIndex < 0 : isLastFrame
+
+  function advanceStory() {
+    setStoryIndex((prev) => (isTimedStory && prev >= storyFrames.length - 1 ? -1 : prev + 1))
+  }
   // Each link hangs off one angle; turning brings a different exit into view.
   const viewLinks = (currentScene?.links ?? []).filter((link) => link.angleOffset === angleOffset)
   const followLink = viewLinks[0]
@@ -131,6 +167,13 @@ export default function Game() {
     onLookLeft: () => leftOffset !== null && lookTowards(leftOffset),
     onLookRight: () => rightOffset !== null && lookTowards(rightOffset),
   })
+
+  // Holding C leans in on the picture towards the cursor.
+  const sceneLayerRef = useRef<HTMLDivElement>(null)
+  const zoomStyle = useHoldZoom(sceneLayerRef, { enabled: true })
+
+  // F steps the story on, just as the İlerle button does.
+  useStoryKey({ enabled: canAdvance, onAdvance: advanceStory })
 
   // W walks through the exit on screen, just as clicking its pin does — so only once the
   // pin is showing.
@@ -165,29 +208,33 @@ export default function Game() {
       )}
 
       {currentScene && displayedImageUrl && (
-        <div className="relative h-full max-h-screen w-full">
-          <img
-            key={displayedImageUrl}
-            src={displayedImageUrl}
-            alt={currentScene.name}
-            className="absolute inset-0 h-full max-h-screen w-full object-cover"
-          />
+        <div className="relative h-full max-h-screen w-full overflow-hidden">
+          {/* The picture and its pins zoom together under C, so a pin stays on its spot;
+              the controls around them stay put. */}
+          <div ref={sceneLayerRef} style={zoomStyle} className="absolute inset-0">
+            <img
+              key={displayedImageUrl}
+              src={displayedImageUrl}
+              alt={currentScene.name}
+              className="absolute inset-0 h-full max-h-screen w-full object-cover"
+            />
 
-          {showLinks &&
-            viewLinks.map((link) => {
-              const override = currentViewKey ? link.anglePositions?.[currentViewKey] : undefined
-              return (
-                <ScenePinButton
-                  key={link.id}
-                  link={link}
-                  position={{
-                    x: override?.positionX ?? link.positionX,
-                    y: override?.positionY ?? link.positionY,
-                  }}
-                  onNavigate={followLinkTo}
-                />
-              )
-            })}
+            {showLinks &&
+              viewLinks.map((link) => {
+                const override = currentViewKey ? link.anglePositions?.[currentViewKey] : undefined
+                return (
+                  <ScenePinButton
+                    key={link.id}
+                    link={link}
+                    position={{
+                      x: override?.positionX ?? link.positionX,
+                      y: override?.positionY ?? link.positionY,
+                    }}
+                    onNavigate={followLinkTo}
+                  />
+                )
+              })}
+          </div>
 
           {storyIndex < 0 && leftOffset !== null && (
             <button
@@ -214,12 +261,19 @@ export default function Game() {
           {canAdvance && (
             <button
               type="button"
-              onClick={() => setStoryIndex((prev) => prev + 1)}
+              onClick={advanceStory}
               className="absolute right-8 top-[calc(50%+6rem)] z-20 flex -translate-y-1/2 items-center gap-2 rounded-full bg-gradient-to-r from-gold to-gold-bright px-5 py-4 font-sans text-body font-[700] text-abyss shadow-lg transition hover:brightness-105"
             >
-              İlerle
+              {storyIndex >= 0 && isLastFrame ? 'Bitir' : 'İlerle'}
+              <kbd className="rounded-md bg-abyss/15 px-1.5 font-mono text-micro font-[800]">F</kbd>
               <FiArrowRight className="h-5 w-5" />
             </button>
+          )}
+
+          {storyIndex >= 0 && (
+            <span className="absolute bottom-8 right-8 z-20 rounded-full border border-white/15 bg-black/60 px-3 py-1.5 font-mono text-micro text-white/80 backdrop-blur-md">
+              {storyIndex + 1} / {storyFrames.length}
+            </span>
           )}
         </div>
       )}

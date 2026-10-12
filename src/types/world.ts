@@ -140,10 +140,20 @@ export interface StoryFrame {
   angleOffset: number
   imageUrl: string
   position: number
+  /**
+   * The minute of the day the story plays by itself on its view, once the world clock
+   * gets there. Every frame of a story carries the same value; null waits for the player.
+   */
+  triggerMinute: number | null
 }
 
 /** Key is {@link viewKey} — one story per angle of per option. */
 export type SceneStories = Record<string, StoryFrame[]>
+
+/** When a story plays by itself — read off its first frame, since they all agree. */
+export function storyTriggerMinute(frames: StoryFrame[]): number | null {
+  return frames[0]?.triggerMinute ?? null
+}
 
 /** Addresses one angle of one option: 'base#0', '<variantId>#-1', … */
 export function viewKey(optionKey: string, angleOffset: number): string {
