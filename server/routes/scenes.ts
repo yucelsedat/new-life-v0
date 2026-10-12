@@ -74,6 +74,13 @@ function parseAngleOffset(value: unknown): number | null {
   return Number.isInteger(offset) ? offset : null
 }
 
+/** A trigger time is a minute of the day, 0 up to but not including 1440; null is none. */
+function parseTriggerMinute(value: unknown): number | null | undefined {
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= 24 * 60) return undefined
+  return value
+}
+
 /** A heading is whole degrees clockwise from 12 o'clock, so 0 up to but not including 360. */
 function parseHeading(value: unknown): number | null {
   if (typeof value !== 'number' || !Number.isInteger(value)) return null
@@ -133,6 +140,7 @@ interface StoryFrameRow {
   angle_offset: number
   image_url: string
   position: number
+  trigger_minute: number | null
   created_at: string
 }
 
@@ -144,6 +152,7 @@ function toStoryFrame(row: StoryFrameRow) {
     angleOffset: row.angle_offset,
     imageUrl: row.image_url,
     position: row.position,
+    triggerMinute: row.trigger_minute,
   }
 }
 
@@ -372,13 +381,15 @@ scenesRouter.get('/:id', (req, res) => {
  * Replace the story for one angle of one option. `variantId` omitted (or 'base')
  * targets the scene's own image; otherwise it must be a variant of this scene.
  * `angleOffset` omitted means the option image itself. An empty imageUrls array
- * clears the story.
+ * clears the story. `triggerMinute` is the minute of the day it plays by itself at;
+ * omitted or null, it waits for the player.
  */
 scenesRouter.put('/:id/story', (req, res) => {
-  const { variantId, angleOffset, imageUrls } = req.body as {
+  const { variantId, angleOffset, imageUrls, triggerMinute } = req.body as {
     variantId?: string | null
     angleOffset?: number
     imageUrls?: string[]
+    triggerMinute?: number | null
   }
 
   const scene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(req.params.id) as SceneRow | undefined
@@ -394,6 +405,12 @@ scenesRouter.put('/:id/story', (req, res) => {
   const offset = parseAngleOffset(angleOffset)
   if (offset === null) {
     res.status(400).json({ error: 'angleOffset must be an integer' })
+    return
+  }
+
+  const trigger = parseTriggerMinute(triggerMinute)
+  if (trigger === undefined) {
+    res.status(400).json({ error: 'triggerMinute must be a minute of the day (0-1439)' })
     return
   }
 
@@ -421,11 +438,11 @@ scenesRouter.put('/:id/story', (req, res) => {
 
   const now = new Date().toISOString()
   const insert = db.prepare(`
-    INSERT INTO story_frames (id, scene_id, variant_id, angle_offset, image_url, position, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO story_frames (id, scene_id, variant_id, angle_offset, image_url, position, trigger_minute, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `)
   imageUrls.forEach((url, index) => {
-    insert.run(randomUUID(), req.params.id, targetVariant, offset, url, index, now)
+    insert.run(randomUUID(), req.params.id, targetVariant, offset, url, index, trigger, now)
   })
 
   const key = viewKey(targetVariant, offset)

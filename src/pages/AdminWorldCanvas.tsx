@@ -46,7 +46,7 @@ import {
   ringHands,
   type RingHand,
 } from '../utils/heading'
-import { viewKey } from '../types/world'
+import { storyTriggerMinute, viewKey } from '../types/world'
 import type { RandomLinkOutcome, SceneLink, WorldScene } from '../types/world'
 
 const HAND_LENGTH = RING_R - 14
@@ -1367,9 +1367,9 @@ export default function AdminWorldCanvas() {
     return added
   }
 
-  async function handleStoryConfirm(imageUrls: string[]) {
+  async function handleStoryConfirm(imageUrls: string[], triggerMinute: number | null) {
     if (!selectedScene) return
-    await submit(() => saveStory(selectedScene.id, selectedOffset, imageUrls))
+    await submit(() => saveStory(selectedScene.id, selectedOffset, imageUrls, triggerMinute))
     setStoryModalOpen(false)
   }
 
@@ -1622,6 +1622,7 @@ export default function AdminWorldCanvas() {
         isSubmitting={isSubmitting}
         scope={{ worldId, kind: 'scene' }}
         initialUrls={selectedStory.map((frame) => frame.imageUrl)}
+        initialTriggerMinute={storyTriggerMinute(selectedStory)}
         hiddenUrls={usedUrls}
         onConfirm={handleStoryConfirm}
         onCancel={() => setStoryModalOpen(false)}

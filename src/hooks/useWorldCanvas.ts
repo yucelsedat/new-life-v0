@@ -47,7 +47,7 @@ export interface UseWorldCanvasResult {
   createAngle: (sceneId: string, imageUrl: string, heading: number, magnetic: boolean) => Promise<SceneAngle | null>
   deleteAngle: (sceneId: string, angleId: string) => Promise<void>
   /** Replace the story of one view of a scene's base option. No images clears it. */
-  saveStory: (sceneId: string, angleOffset: number, imageUrls: string[]) => Promise<void>
+  saveStory: (sceneId: string, angleOffset: number, imageUrls: string[], triggerMinute: number | null) => Promise<void>
   /** Swap the image behind a view: the scene's own (`angleId` null) or one of its angles. */
   changeViewImage: (sceneId: string, angleId: string | null, imageUrl: string) => Promise<void>
   /** Hang a link on another view of its scene. */
@@ -231,8 +231,8 @@ export function useWorldCanvas(worldId: string): UseWorldCanvasResult {
   )
 
   const saveStory = useCallback(
-    async (sceneId: string, angleOffset: number, imageUrls: string[]) => {
-      await change('create-failed', `/api/scenes/${sceneId}/story`, 'PUT', { angleOffset, imageUrls })
+    async (sceneId: string, angleOffset: number, imageUrls: string[], triggerMinute: number | null) => {
+      await change('create-failed', `/api/scenes/${sceneId}/story`, 'PUT', { angleOffset, imageUrls, triggerMinute })
     },
     [change],
   )

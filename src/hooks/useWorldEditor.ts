@@ -26,7 +26,7 @@ export interface UseWorldEditorResult {
   /** Make the view on screen — an option image or one of its angles — magnetic, or plain again. */
   setViewMagnetic: (optionKey: string, angleOffset: number, magnetic: boolean) => void
   deleteAngle: (optionKey: string, angleId: string) => Promise<void>
-  saveStory: (optionKey: string, angleOffset: number, imageUrls: string[]) => Promise<void>
+  saveStory: (optionKey: string, angleOffset: number, imageUrls: string[], triggerMinute: number | null) => Promise<void>
   changeViewImage: (optionKey: string, angleOffset: number, imageUrl: string) => Promise<void>
   goToScene: (sceneId: string) => Promise<void>
   moveLinkToAngle: (linkId: string, angleOffset: number) => Promise<void>
@@ -232,14 +232,14 @@ export function useWorldEditor(worldId: string, openSceneId?: string | null): Us
   )
 
   const saveStory = useCallback(
-    async (optionKey: string, angleOffset: number, imageUrls: string[]) => {
+    async (optionKey: string, angleOffset: number, imageUrls: string[], triggerMinute: number | null) => {
       if (!currentScene) return
       setError(null)
       try {
         const response = await fetch(`/api/scenes/${currentScene.id}/story`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ variantId: toVariantId(optionKey), angleOffset, imageUrls }),
+          body: JSON.stringify({ variantId: toVariantId(optionKey), angleOffset, imageUrls, triggerMinute }),
         })
         if (!response.ok) throw new Error(`Request failed: ${response.status}`)
         const { frames } = (await response.json()) as { viewKey: string; frames: StoryFrame[] }

@@ -1,14 +1,16 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { LuMagnet } from 'react-icons/lu'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   FiArrowLeft,
   FiArrowRight,
   FiBookOpen,
+  FiClock,
   FiCompass,
   FiCopy,
   FiGrid,
   FiImage,
+  FiPlay,
   FiPlusCircle,
   FiRefreshCw,
   FiTrash2,
@@ -19,6 +21,8 @@ import { useUsedImages } from '../hooks/useUsedImages'
 import { useWorldOptionTimes } from '../hooks/useWorldOptionTimes'
 import { useAngleKeys } from '../hooks/useAngleKeys'
 import { useLinkKey } from '../hooks/useLinkKey'
+import { useStoryKey } from '../hooks/useStoryKey'
+import { useHoldZoom } from '../hooks/useHoldZoom'
 import GalleryPickerModal from '../components/admin/GalleryPickerModal'
 import StoryPickerModal from '../components/admin/StoryPickerModal'
 import AnglePickerModal from '../components/admin/AnglePickerModal'
@@ -28,7 +32,7 @@ import DeleteConnectionModal from '../components/admin/DeleteConnectionModal'
 import { clamp } from '../utils/helpers'
 import { formatClock } from '../utils/worldClock'
 import { arrivalOffset, headingHour, ringHands, turnAngle } from '../utils/heading'
-import { viewKey } from '../types/world'
+import { storyTriggerMinute, viewKey } from '../types/world'
 import type { SceneLink } from '../types/world'
 
 type ModalMode = 'first-scene' | 'create-link' | 'create-variant' | 'change-image' | null
@@ -175,10 +179,10 @@ export default function AdminWorldEditor() {
     setStoryIndex(-1)
   }
 
-  async function handleStoryConfirm(imageUrls: string[]) {
+  async function handleStoryConfirm(imageUrls: string[], triggerMinute: number | null) {
     setIsSubmitting(true)
     try {
-      await saveStory(activeOption, angleOffset, imageUrls)
+      await saveStory(activeOption, angleOffset, imageUrls, triggerMinute)
       setStoryIndex(-1)
       await refetchUsed()
     } finally {
@@ -301,9 +305,17 @@ export default function AdminWorldEditor() {
 
   const currentViewKey = viewKey(activeOption, angleOffset)
   const storyFrames = currentScene?.stories?.[currentViewKey] ?? []
-  // Advancing walks off the view image and through the story, stopping on the last frame.
+  // Advancing walks off the view image and through the story; a step past the last frame
+  // closes it again, back onto the view image.
   const displayedImage = storyIndex >= 0 ? (storyFrames[storyIndex]?.imageUrl ?? viewImage) : viewImage
-  const canAdvance = storyFrames.length > 0 && storyIndex < storyFrames.length - 1
+  const canAdvance = storyFrames.length > 0
+  const isLastFrame = storyIndex === storyFrames.length - 1
+  const storyTrigger = storyTriggerMinute(storyFrames)
+  const frameCount = storyFrames.length
+  const advanceStory = useCallback(
+    () => setStoryIndex((prev) => (prev >= frameCount - 1 ? -1 : prev + 1)),
+    [frameCount],
+  )
   // Links belong at the end of the narrative: with a story they surface on its last
   // frame, otherwise straight away on the view image.
   const showLinks = storyFrames.length === 0 ? storyIndex < 0 : storyIndex === storyFrames.length - 1
@@ -350,6 +362,24 @@ export default function AdminWorldEditor() {
     onLookRight: () => rightOffset !== null && lookTowards(rightOffset),
   })
 
+  // F steps through the story as İlerle does, starting it from the view image.
+  useStoryKey({
+    enabled:
+      canAdvance &&
+      modalMode === null &&
+      !storyModalOpen &&
+      !angleModalOpen &&
+      linkToDelete === null &&
+      !isSubmitting,
+    onAdvance: advanceStory,
+  })
+
+  // Holding C leans in on the picture towards the cursor.
+  const zoomStyle = useHoldZoom(backgroundRef, {
+    enabled:
+      modalMode === null && !storyModalOpen && !angleModalOpen && linkToDelete === null && !isSubmitting,
+  })
+
   // W walks through the view's link, but only once it is on screen — at the end of the
   // story, as a click on the pin would.
   useLinkKey({
@@ -366,7 +396,7 @@ export default function AdminWorldEditor() {
 
   return (
     <div className="relative h-screen max-h-screen w-screen overflow-hidden bg-void">
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-6 py-5">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between px-6 py-5">
         <Link
           to="/admin"
           className="pointer-events-auto flex items-center gap-2 rounded-full border border-white/15 bg-black/40 px-4 py-2 font-sans text-caption text-white/70 backdrop-blur-md transition hover:border-gold-bright hover:text-gold-bright"
@@ -376,10 +406,19 @@ export default function AdminWorldEditor() {
         </Link>
 
         <div className="pointer-events-auto flex items-center gap-4">
-          <div className="text-right">
-            <p className="font-display text-h2 font-[300] text-white/95">{t.admin.editor.openingTitle}</p>
-            {worldName && <p className="font-sans text-caption text-mist">{worldName}</p>}
-          </div>
+          {worldName && (
+            <span className="rounded-full bg-black/50 px-3 py-1 font-sans text-caption text-white/80 backdrop-blur-md">
+              {worldName}
+            </span>
+          )}
+
+          <Link
+            to={`/game/${worldId}`}
+            className="flex items-center gap-2 rounded-full bg-gradient-to-r from-gold to-gold-bright px-4 py-2 font-sans text-caption font-[800] text-abyss shadow-lg transition hover:brightness-105"
+          >
+            <FiPlay className="h-3.5 w-3.5" />
+            {t.admin.editor.playButton}
+          </Link>
 
           <Link
             to={`/admin/worlds/${worldId}/canvas`}
@@ -409,32 +448,36 @@ export default function AdminWorldEditor() {
       )}
 
       {currentScene && displayedImage && (
-        <div ref={backgroundRef} className="relative h-full max-h-screen w-full">
-          <img
-            key={displayedImage}
-            src={displayedImage}
-            alt={currentScene.name}
-            className="absolute inset-0 h-full max-h-screen w-full object-cover"
-          />
+        <div className="relative h-full max-h-screen w-full overflow-hidden">
+          {/* The picture and its pins zoom together under C, so a pin stays on its spot;
+              the controls around them stay put. */}
+          <div ref={backgroundRef} style={zoomStyle} className="absolute inset-0">
+            <img
+              key={displayedImage}
+              src={displayedImage}
+              alt={currentScene.name}
+              className="absolute inset-0 h-full max-h-screen w-full object-cover"
+            />
 
-          {showLinks &&
-            viewLinks.map((link) => {
-              const override = link.anglePositions?.[currentViewKey]
-              return (
-                <ScenePin
-                  key={link.id}
-                  link={link}
-                  title={t.admin.editor.followLink.replace('{label}', link.label)}
-                  position={{
-                    x: override?.positionX ?? link.positionX,
-                    y: override?.positionY ?? link.positionY,
-                  }}
-                  containerRef={backgroundRef}
-                  onDragEnd={(linkId, x, y) => updateLinkPosition(linkId, activeOption, angleOffset, x, y)}
-                  onNavigate={followLinkTo}
-                />
-              )
-            })}
+            {showLinks &&
+              viewLinks.map((link) => {
+                const override = link.anglePositions?.[currentViewKey]
+                return (
+                  <ScenePin
+                    key={link.id}
+                    link={link}
+                    title={t.admin.editor.followLink.replace('{label}', link.label)}
+                    position={{
+                      x: override?.positionX ?? link.positionX,
+                      y: override?.positionY ?? link.positionY,
+                    }}
+                    containerRef={backgroundRef}
+                    onDragEnd={(linkId, x, y) => updateLinkPosition(linkId, activeOption, angleOffset, x, y)}
+                    onNavigate={followLinkTo}
+                  />
+                )
+              })}
+          </div>
 
           {/* Turning left or right stays inside the same scene; each view shows its own link. */}
           {storyIndex < 0 && leftOffset !== null && (
@@ -522,20 +565,28 @@ export default function AdminWorldEditor() {
           {canAdvance && (
             <button
               type="button"
-              onClick={() => setStoryIndex((prev) => prev + 1)}
+              onClick={advanceStory}
               className="absolute right-8 top-[calc(50%+5rem)] z-20 flex -translate-y-1/2 items-center gap-2 rounded-full bg-gradient-to-r from-gold to-gold-bright px-4 py-3 font-sans text-caption font-[700] text-abyss shadow-lg transition hover:brightness-105"
             >
-              {t.admin.story.advance}
+              {isLastFrame ? t.admin.story.finishKey : t.admin.story.advanceKey}
               <FiArrowRight className="h-4 w-4" />
             </button>
           )}
 
           {storyFrames.length > 0 && (
-            <span className="absolute bottom-8 right-8 z-20 rounded-full border border-white/15 bg-black/60 px-3 py-1.5 font-mono text-micro text-white/80 backdrop-blur-md">
-              {t.admin.story.frameCounter
-                .replace('{i}', String(storyIndex + 1))
-                .replace('{n}', String(storyFrames.length))}
-            </span>
+            <div className="absolute bottom-8 right-8 z-20 flex items-center gap-2">
+              {storyTrigger !== null && (
+                <span className="flex items-center gap-1.5 rounded-full border border-gold-bright/40 bg-black/60 px-3 py-1.5 font-mono text-micro text-gold-bright backdrop-blur-md">
+                  <FiClock className="h-3 w-3" />
+                  {t.admin.story.trigger.badge.replace('{time}', formatClock(storyTrigger))}
+                </span>
+              )}
+              <span className="rounded-full border border-white/15 bg-black/60 px-3 py-1.5 font-mono text-micro text-white/80 backdrop-blur-md">
+                {t.admin.story.frameCounter
+                  .replace('{i}', String(storyIndex + 1))
+                  .replace('{n}', String(storyFrames.length))}
+              </span>
+            </div>
           )}
 
           <div className="absolute bottom-6 left-6 z-20 flex flex-col items-start gap-1.5">
@@ -723,6 +774,7 @@ export default function AdminWorldEditor() {
         isSubmitting={isSubmitting}
         scope={{ worldId, kind: 'scene' }}
         initialUrls={storyFrames.map((frame) => frame.imageUrl)}
+        initialTriggerMinute={storyTrigger}
         hiddenUrls={usedUrls}
         onConfirm={handleStoryConfirm}
         onCancel={() => setStoryModalOpen(false)}
